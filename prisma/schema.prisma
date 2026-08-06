@@ -11,3 +11,64 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum UserRole {
+  ADMIN
+  CUSTOMER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+}
+
+model User {
+  id              String      @id @default(uuid())
+  email           String      @unique
+  phone           String      @unique
+  firstName       String
+  lastName        String?
+  avatar          String?
+  role            UserRole    @default(CUSTOMER)
+  status          UserStatus  @default(ACTIVE)
+  emailVerified   Boolean     @default(false)
+  phoneVerified   Boolean     @default(false)
+  lastLoginAt     DateTime?
+
+  addresses       Address[]
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@map("users")
+}
+
+model Address {
+  id              String      @id @default(uuid())
+
+  userId          String
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  label           String?
+  recipientName   String
+  phone           String
+
+  addressLine1    String
+  addressLine2    String?
+
+  landmark        String?
+
+  city            String
+  state           String
+  country         String      @default("India")
+  postalCode      String
+
+  isDefault       Boolean     @default(false)
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([userId])
+  @@map("addresses")
+}
