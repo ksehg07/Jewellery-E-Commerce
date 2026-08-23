@@ -5,12 +5,12 @@ import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Container } from "@/components/layout/container";
 import { ProductCard } from "@/components/storefront/product-card";
-import { mockProducts } from "@/features/products/data/mock-products";
+import { getFeaturedProducts } from "@/features/products";
 
 import { SectionHeading } from "./section-heading";
 
-export function FeaturedProducts() {
-  const featuredProducts = mockProducts.slice(0, 4);
+export async function FeaturedProducts() {
+  const featuredProducts = await getFeaturedProducts();
 
   return (
     <section className="bg-secondary py-20 sm:py-24">

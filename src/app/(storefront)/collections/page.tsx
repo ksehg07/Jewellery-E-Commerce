@@ -4,25 +4,25 @@ import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 
 import { Container } from "@/components/layout/container";
-import { mockProducts } from "@/features/products/data/mock-products";
+import { getProducts } from "@/features/products";
 
-const collections = Array.from(
-  mockProducts.reduce((map, product) => {
-    const existing = map.get(product.category) ?? {
-      name: product.category,
-      image: product.image,
-      count: 0,
-    };
+export default async function CollectionsPage() {
+  const products = await getProducts();
+  const collections = Array.from(
+    products.reduce((map, product) => {
+      const existing = map.get(product.categorySlug) ?? {
+        name: product.category,
+        image: product.image,
+        count: 0,
+      };
 
-    existing.count += 1;
-    map.set(product.category, existing);
+      existing.count += 1;
+      map.set(product.categorySlug, existing);
 
-    return map;
-  }, new Map<string, { name: string; image: string; count: number }>()),
-  ([, collection]) => collection,
-);
-
-export default function CollectionsPage() {
+      return map;
+    }, new Map<string, { name: string; image: string; count: number }>()),
+    ([, collection]) => collection,
+  );
   return (
     <Container className="py-16 sm:py-20">
       <div className="max-w-3xl">

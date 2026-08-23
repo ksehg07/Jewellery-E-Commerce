@@ -1,7 +1,7 @@
-import type { MockProduct } from "@/features/products/data/mock-products";
+import type { StorefrontProduct } from "@/features/products/types/product";
 
 type ProductDetailsProps = {
-  product: MockProduct;
+  product: StorefrontProduct;
 };
 
 export function ProductDetails({ product }: ProductDetailsProps) {
@@ -36,11 +36,11 @@ export function ProductDetails({ product }: ProductDetailsProps) {
               </div>
             ) : null}
 
-            {product.weight ? (
+            {product.weight !== null ? (
               <div className="flex items-center justify-between py-4">
                 <dt className="text-sm text-muted-foreground">Weight</dt>
 
-                <dd className="text-sm font-medium">{product.weight}</dd>
+                <dd className="text-sm font-medium">{product.weight}g</dd>
               </div>
             ) : null}
 

@@ -3,10 +3,10 @@ import Link from "next/link";
 
 import { Heart } from "lucide-react";
 
-import type { MockProduct } from "@/features/products/data/mock-products";
+import type { StorefrontProduct } from "@/features/products/types/product";
 
 type ProductCardProps = {
-  product: MockProduct;
+  product: StorefrontProduct;
 };
 
 export function ProductCard({ product }: ProductCardProps) {
@@ -47,7 +47,9 @@ export function ProductCard({ product }: ProductCardProps) {
         </Link>
 
         <p className="text-sm text-muted-foreground">
-          ₹{product.price.toLocaleString("en-IN")}
+          {product.price === null
+            ? "Price on request"
+            : `₹${product.price.toLocaleString("en-IN")}`}
         </p>
       </div>
     </article>

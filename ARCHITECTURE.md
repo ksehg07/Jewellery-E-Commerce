@@ -153,7 +153,7 @@ Current schema domains:
 
 Important relationships include users to addresses, carts, orders, reviews, accounts, and sessions; products to categories, optional collections, images, variants, inventory, cart items, order items, and reviews; and orders to historical order items, one address, and an optional one-to-one payment.
 
-The current schema already includes PostgreSQL decimal fields for monetary values and weights, enum-backed order/payment states, uniqueness for product slugs/SKUs, variant SKUs, and the product/variant inventory relation.
+The current schema already includes PostgreSQL decimal fields for monetary values and weights, enum-backed order/payment states, uniqueness for product slugs/SKUs, variant SKUs, and the product/variant inventory relation. Sprint 6.1 has added explicit audience and pricing fields to `Product`, plus variant-level weight and pricing fields.
 
 ### Controlled audit note
 
@@ -163,9 +163,9 @@ The schema is a foundation, not proof that every planned behavior is wired. It c
 
 ### Current implementation
 
-The visual storefront uses `MockProduct` and `MockProductVariant` from `src/features/products/data/mock-products.ts`. `/shop` passes the mock array to `ShopClient`, where search filters locally. `/product/[slug]` finds a mock product by slug and derives related products from the same array.
+The visual storefront now consumes `StorefrontProduct` from `src/features/products/types/product.ts`. Server-only query functions in `src/features/products/queries/` fetch active Prisma products, and `src/features/products/utils/product-mappers.ts` converts Decimal values, dates, images, variants, category data, and inventory into serializable storefront data. `/shop` still performs search locally in `ShopClient`, but its input is now server-fetched.
 
-The Prisma product model supports the intended catalogue relationships: category, optional collection, images, variants, inventory, and order/cart references. A normalized catalogue query layer is not implemented yet; `src/services/product.service.ts` is currently empty.
+The Prisma product model supports the intended catalogue relationships: category, optional collection, images, variants, inventory, and order/cart references. The older `src/services/product.service.ts` boundary remains empty; product reads are owned by the feature query layer for Sprint 6.3.
 
 ### Target model
 
@@ -181,13 +181,13 @@ Product
 
 Audience should be data, not duplicated in category names. For example, `Ring + WOMEN + GOLD` is preferred to a separate `Women's Ring` category. The final model must support jewellery and silverware, including products such as silver diyas, glasses, spoons, bowls, and toys.
 
-Catalogue normalization and any necessary schema upgrade are `IN PROGRESS` in Sprint 6.1-6.2.
+Catalogue normalization is complete enough for the current product query contract; further raw catalogue import remains dependent on the catalogue data source.
 
 ## Pricing Architecture
 
 ### Current implementation
 
-The mock catalogue exposes a single numeric `price` and variant price values. The cart subtotal is calculated from those client-held numbers. There is no database-backed pricing calculator or live metal-rate integration yet.
+The storefront mapper exposes `Product.fixedPrice` as its display price. Metal-based products without a stored fixed display price expose `null` and render “Price on request”; no live price is fabricated. Fixed-price variant prices use variant fixed price when present, otherwise product fixed price plus `priceAdjustment`. The cart subtotal is still calculated from client-held values.
 
 The Prisma schema stores some required inputs for metal-rate pricing and has a `MetalRate` table keyed uniquely by metal and purity. `ProductVariant.priceAdjustment` exists, but a complete product/variant pricing contract is not implemented.
 
@@ -208,7 +208,7 @@ The system must support both:
 
 Pricing strategy, fixed price, material/metal, purity, weight, making charge type/value, additional charges, stone charges, and tax must be represented at the correct product or variant level. Variant differences such as size, weight, SKU, price, pricing strategy, and inventory must be supported.
 
-Financial values must be calculated and validated on the server for checkout. Client cart prices are display state, not an authority for an order total. This is `PLANNED` and is a key part of Sprint 6.3-6.4.
+Financial values must be calculated and validated on the server for checkout. Client cart prices are display state, not an authority for an order total. This remains `PLANNED` for the payment/order phase.
 
 ## Cart and State Management
 
@@ -240,7 +240,7 @@ Storefront UI is organized by concern:
 - `components/storefront/cart`: cart items, sheet, trigger.
 - `components/storefront/checkout`: checkout form and order summary.
 
-The current customer experience is visually implemented around mock data. Dynamic Prisma-backed rendering is `PLANNED` after the product query layer is in place.
+The homepage featured section, shop, product detail, collections, and new arrivals now use dynamic Prisma-backed queries while preserving the existing UI. The mock data file remains in place for transition safety and should only be removed after all references are intentionally retired.
 
 ## Admin Architecture
 
@@ -296,14 +296,17 @@ Environment files and secrets are not architecture data and must remain outside 
 
 ### IN PROGRESS
 
-- Transition from `mockProducts` to Prisma-backed catalogue architecture.
-- Sprint 6.1 controlled product schema audit and upgrade.
-- Sprint 6.2 catalogue normalization planning.
+- Catalogue migration from `mockProducts` to Prisma-backed reads.
+- Sprint 6.2 catalogue normalization/loading for the real catalogue.
+- Server-authoritative pricing and checkout validation.
 
-### Not yet implemented
+### Completed in this position
 
-- Product query/service layer.
-- Dynamic storefront data.
+- Sprint 6.3 product query layer, mapper, serializable storefront types, and query helpers.
+- Sprint 6.4 dynamic storefront integration for shop, product detail, featured products, collections, and new arrivals.
+
+### PLANNED / Not yet implemented
+
 - Admin dashboard and admin CRUD.
 - Database/local-cart reconciliation.
 - Pricing calculator and live metal-rate integration.
@@ -314,17 +317,15 @@ Environment files and secrets are not architecture data and must remain outside 
 
 **Sprint 6: Product Foundation Transition**
 
-Immediate task: **Sprint 6.1 - Controlled Product Schema Audit and Upgrade**.
+Completed in this position: **Sprint 6.1 - Controlled Product Schema Audit and Upgrade**, **Sprint 6.3 - Product Data Layer**, and **Sprint 6.4 - Dynamic Storefront**.
 
-The audit must compare the actual schema with normalized catalogue, audience, variant, and pricing requirements. It must patch only necessary gaps and preserve the existing foundation.
+Remaining Sprint 6 work is catalogue data loading/normalization and any validation needed for the real catalogue.
 
 ## Planned Next Steps
 
-1. **Sprint 6.1:** Audit and, if justified, minimally upgrade the product schema.
-2. **Sprint 6.2:** Normalize the client's raw catalogue into internal product, audience, material, category, and variant data.
-3. **Sprint 6.3:** Implement the Prisma-backed product query/service layer and validation boundary.
-4. **Sprint 6.4:** Replace mock storefront reads with dynamic product queries and server-authoritative pricing.
-5. **Sprint 7:** Build the premium admin dashboard against the shared product, inventory, order, and pricing system.
+1. **Sprint 6.2:** Complete normalization/loading of the client's raw catalogue into internal product, audience, material, category, and variant data.
+2. Add server-authoritative pricing and checkout validation when the order/payment phase begins.
+3. **Sprint 7:** Build the premium admin dashboard against the shared product, inventory, order, and pricing system.
 
 Each step that changes architecture, routes, models, state, integrations, or sprint status must update this document in the same task.
 
@@ -408,10 +409,20 @@ Invoice data must be based on immutable order snapshots so later product price, 
 
 **Status:** Planned; gateway selection pending.
 
+### 2026-08-23 / Sprint 6.3-6.4: Centralized storefront product mapping
+
+**Decision:** Keep Prisma access in server-only feature queries and pass a mapped `StorefrontProduct` shape to the existing storefront components.
+
+**Reason:** This replaces mock reads without exposing Prisma Decimal values or database relations to React components, and avoids redesigning the current storefront.
+
+**Impact:** Product queries, serialization, product cards, product detail, featured products, collections, arrivals, and the remaining mock-data transition.
+
+**Status:** Current.
+
 ## Known Technical Considerations
 
-- Product pages and shop pages currently use mock data, so the storefront is not yet a database-backed catalogue.
-- `product.service.ts` and `order.service.ts` are empty boundaries; business logic should be added there or in clearly owned server actions/services rather than scattered through UI components.
+- `product.service.ts` and `order.service.ts` are empty boundaries; product reads currently live in `src/features/products/queries/`, while order logic remains unimplemented.
+- The mock product file remains in the repository, but active storefront page references have been replaced by dynamic queries.
 - Client cart prices are mutable browser state and cannot be trusted for final order totals.
 - Decimal monetary and weight values must preserve precision across Prisma, pricing calculations, serialization, and UI formatting.
 - Variant-level weight and pricing strategy are not fully represented by the current schema; resolve this during the controlled audit rather than adding ad hoc fields during catalogue import.

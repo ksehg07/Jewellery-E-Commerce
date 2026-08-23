@@ -9,17 +9,17 @@ import { Button } from "@/components/ui/button";
 import { useCartStore } from "@/features/cart/store";
 
 import type {
-  MockProduct,
-  MockProductVariant,
-} from "@/features/products/data/mock-products";
+  StorefrontProduct,
+  StorefrontProductVariant,
+} from "@/features/products/types/product";
 
 type ProductInfoProps = {
-  product: MockProduct;
+  product: StorefrontProduct;
 };
 
 export function ProductInfo({ product }: ProductInfoProps) {
   const [selectedVariant, setSelectedVariant] =
-    useState<MockProductVariant | null>(product.variants?.[0] ?? null);
+    useState<StorefrontProductVariant | null>(product.variants?.[0] ?? null);
 
   const [quantity, setQuantity] = useState(1);
 
@@ -43,7 +43,7 @@ export function ProductInfo({ product }: ProductInfoProps) {
 
       image: product.image,
 
-      price,
+      price: price ?? 0,
 
       quantity,
 
@@ -66,7 +66,9 @@ export function ProductInfo({ product }: ProductInfoProps) {
           </h1>
 
           <p className="mt-4 text-lg text-muted-foreground">
-            ₹{price.toLocaleString("en-IN")}
+            {price === null
+              ? "Price on request"
+              : `₹${price.toLocaleString("en-IN")}`}
           </p>
 
           {product.shortDescription ? (
@@ -128,8 +130,13 @@ export function ProductInfo({ product }: ProductInfoProps) {
           </div>
         </div>
 
-        <Button size="lg" className="w-full" onClick={handleAddToCart}>
-          Add to Cart
+        <Button
+          size="lg"
+          className="w-full"
+          onClick={handleAddToCart}
+          disabled={price === null}
+        >
+          {price === null ? "Price on request" : "Add to Cart"}
         </Button>
       </div>
     </div>

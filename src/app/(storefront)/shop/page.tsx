@@ -1,14 +1,16 @@
 import { ShopClient } from "@/components/storefront/shop/shop-client";
 import { ShopHeader } from "@/components/storefront/shop/shop-header";
 
-import { mockProducts } from "@/features/products/data/mock-products";
+import { getProducts } from "@/features/products";
 
-export default function ShopPage() {
+export default async function ShopPage() {
+  const products = await getProducts();
+
   return (
     <>
-      <ShopHeader productCount={mockProducts.length} />
+      <ShopHeader productCount={products.length} />
 
-      <ShopClient products={mockProducts} />
+      <ShopClient products={products} />
     </>
   );
 }

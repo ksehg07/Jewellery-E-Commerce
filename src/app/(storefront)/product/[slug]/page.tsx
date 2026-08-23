@@ -6,7 +6,10 @@ import { ProductGallery } from "@/components/storefront/product/product-gallery"
 import { ProductInfo } from "@/components/storefront/product/product-info";
 import { RelatedProducts } from "@/components/storefront/product/related-products";
 
-import { mockProducts } from "@/features/products/data/mock-products";
+import {
+  getProductBySlug,
+  getProducts,
+} from "@/features/products";
 
 type ProductPageProps = {
   params: Promise<{
@@ -19,18 +22,16 @@ export default async function ProductPage({
 }: ProductPageProps) {
   const { slug } = await params;
 
-  const product = mockProducts.find(
-    (item) => item.slug === slug,
-  );
+  const product = await getProductBySlug(slug);
 
   if (!product) {
     notFound();
   }
 
-  const relatedProducts = mockProducts
+  const relatedProducts = (await getProducts())
     .filter(
       (item) =>
-        item.category === product.category &&
+        item.categorySlug === product.categorySlug &&
         item.id !== product.id,
     )
     .slice(0, 4);

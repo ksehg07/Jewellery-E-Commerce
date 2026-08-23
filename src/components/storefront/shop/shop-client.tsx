@@ -6,10 +6,10 @@ import { EmptyProducts } from "./empty-products";
 import { ProductGrid } from "./product-grid";
 import { ShopToolbar } from "./shop-toolbar";
 
-import type { MockProduct } from "@/features/products/data/mock-products";
+import type { StorefrontProduct } from "@/features/products/types/product";
 
 type ShopClientProps = {
-  products: MockProduct[];
+  products: StorefrontProduct[];
 };
 
 export function ShopClient({

@@ -1,10 +1,10 @@
 import { Container } from "@/components/layout/container";
 import { ProductGrid } from "@/components/storefront/shop/product-grid";
-import { mockProducts } from "@/features/products/data/mock-products";
+import { getNewArrivals } from "@/features/products";
 
-const newArrivals = mockProducts.slice(0, 8);
+export default async function ArrivalsPage() {
+  const newArrivals = await getNewArrivals();
 
-export default function ArrivalsPage() {
   return (
     <>
       <section className="py-16 sm:py-20">

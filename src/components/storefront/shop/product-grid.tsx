@@ -1,10 +1,10 @@
 import { Container } from "@/components/layout/container";
 import { ProductCard } from "@/components/storefront/product-card";
 
-import type { MockProduct } from "@/features/products/data/mock-products";
+import type { StorefrontProduct } from "@/features/products/types/product";
 
 type ProductGridProps = {
-  products: MockProduct[];
+  products: StorefrontProduct[];
 };
 
 export function ProductGrid({
