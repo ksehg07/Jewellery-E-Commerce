@@ -1,0 +1,17 @@
+POST http://localhost:3000/api/auth/email-otp/send-verification-otp
+Content-Type: application/json
+
+{
+  "email": "ksehgal2003@gmail.com",
+  "type": "sign-in"
+}
+
+###
+
+POST http://localhost:3000/api/auth/sign-in/email-otp
+Content-Type: application/json
+
+{
+  "email": "ksehgal2003@gmail.com",
+  "otp": "554973"
+}
