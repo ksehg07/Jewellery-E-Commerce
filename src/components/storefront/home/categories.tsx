@@ -10,23 +10,23 @@ import { SectionHeading } from "./section-heading";
 const categories = [
   {
     name: "Rings",
+    slug: "rings",
     image: "/images/categories/rings.jpg",
-    href: "/shop?category=rings",
   },
   {
     name: "Earrings",
+    slug: "earrings",
     image: "/images/categories/earrings.jpg",
-    href: "/shop?category=earrings",
   },
   {
-    name: "Necklaces",
+    name: "Pendants",
+    slug: "pendants",
     image: "/images/categories/necklaces.jpg",
-    href: "/shop?category=necklaces",
   },
   {
     name: "Bracelets",
+    slug: "bracelets",
     image: "/images/categories/bracelets.jpg",
-    href: "/shop?category=bracelets",
   },
 ];
 
@@ -44,7 +44,7 @@ export function Categories() {
           {categories.map((category) => (
             <Link
               key={category.name}
-              href={category.href}
+              href={`/shop?category=${category.slug}`}
               className="group relative aspect-[4/5] overflow-hidden bg-secondary"
             >
               <Image

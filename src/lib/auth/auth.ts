@@ -68,6 +68,10 @@ export const auth = betterAuth({
     },
   },
 
+  emailAndPassword: {
+    enabled: true,
+  },
+  
   plugins: [
     emailOTP({
       otpLength: 6,

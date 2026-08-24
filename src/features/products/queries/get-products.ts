@@ -11,7 +11,7 @@ import {
 import type { StorefrontProduct } from "../types/product";
 
 type GetProductsOptions = {
-  categoryId?: string;
+  categorySlug?: string;
   collectionId?: string;
   limit?: number;
 };
@@ -21,7 +21,7 @@ export async function getProducts(
 ): Promise<StorefrontProduct[]> {
   const where: Prisma.ProductWhereInput = {
     isActive: true,
-    ...(options.categoryId ? { categoryId: options.categoryId } : {}),
+    ...(options.categorySlug ? { category: { slug: options.categorySlug } } : {}),
     ...(options.collectionId ? { collectionId: options.collectionId } : {}),
   };
 

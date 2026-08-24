@@ -1,8 +1,8 @@
 # NPJ Jewellery E-Commerce Platform Architecture
 
 **Status:** Living architecture source of truth  
-**Last reviewed:** 2026-08-22  
-**Current position:** Sprint 6, before Sprint 6.1
+**Last reviewed:** 2026-08-23
+**Current position:** Sprint 7 foundation plus account route foundation
 
 This document describes the architecture that exists in the repository today. Future work is explicitly labeled `PLANNED` and must not be read as implemented behavior.
 
@@ -60,10 +60,12 @@ prisma/
 src/
   app/                          App Router layouts, pages, and API routes
     (storefront)/               Shared customer storefront route group
+    (admin)/admin/              Protected admin route group and dashboard
     api/auth/[...all]/           Better Auth catch-all API handler
   actions/                      Server action area; currently sparse
   components/
     layout/                     Header, footer, announcement, navigation, container
+    admin/                      Protected dashboard shell, sidebar, and header
     storefront/                 Home, shop, product, cart, and checkout UI
     ui/                         Reusable UI primitives
   config/                       Site configuration
@@ -81,6 +83,8 @@ src/
   services/                     Service-layer boundaries; product/order services are currently empty
   styles/                       Shared styles area
   types/                        Shared domain types
+scripts/
+  promote-admin.ts              Operator-only first-admin promotion script
 public/images/                  Storefront category and product image assets
 ```
 
@@ -91,10 +95,11 @@ Generated Prisma files should be regenerated from `prisma/schema.prisma`; they a
 The `(storefront)` folder is a route group, so it does not appear in public URLs. The current implemented public routes are:
 
 - `/` - homepage
-- `/shop` - mock product listing and client-side search
+- `/shop` - Prisma-backed product listing, optional category query filtering, and client-side search
 - `/product/[slug]` - mock product detail and related products
 - `/cart` - cart page
 - `/checkout` - checkout UI
+- `/account` - session-aware customer account foundation
 - `/collections` - collections page
 - `/arrivals` - new arrivals page
 - `/about` - about page
@@ -109,7 +114,7 @@ Implemented API route:
 
 - `/api/auth/[...all]` - GET and POST are forwarded to Better Auth via `toNextJsHandler`.
 
-`/admin` routes are `PLANNED`; no admin route tree currently exists. Product and order API/server actions are also `PLANNED`.
+The protected `/admin` route is implemented under the `(admin)` organizational route group. Its layout performs server-side authorization before rendering child pages. Product and order API/server actions remain `PLANNED`.
 
 ## Authentication Architecture
 
@@ -129,12 +134,13 @@ The user model supports:
 
 The authentication configuration enables in-memory rate limiting. Email OTPs are six digits, expire after 300 seconds, and allow three attempts. Sending verification OTPs is limited to three requests per 60-second window. OTP email delivery uses Resend.
 
-Server authorization helpers provide active-user and role checks, including `requireAdmin`, but an admin route or dashboard currently does not consume them.
+Server authorization helpers provide active-user and role checks. The admin layout uses `src/lib/auth/require-admin.ts`, which reads the Better Auth session, verifies the corresponding Prisma user is `ACTIVE` and has the `ADMIN` role, and redirects unauthorized requests to `/`.
+
+There is currently no login route in the repository. The account page therefore renders a truthful unavailable-authentication state when no session is present, while authenticated sessions can view session-provided profile identity and sign out.
 
 ### Planned
 
 - Customer account workflows and protected customer features.
-- Admin route protection and dashboard authorization using the existing role/status helpers.
 - Review of rate-limit storage before production scaling; current storage is process memory.
 
 ## Database Architecture
@@ -240,13 +246,19 @@ Storefront UI is organized by concern:
 - `components/storefront/cart`: cart items, sheet, trigger.
 - `components/storefront/checkout`: checkout form and order summary.
 
-The homepage featured section, shop, product detail, collections, and new arrivals now use dynamic Prisma-backed queries while preserving the existing UI. The mock data file remains in place for transition safety and should only be removed after all references are intentionally retired.
+The homepage featured section, shop, product detail, collections, and new arrivals now use dynamic Prisma-backed queries while preserving the existing UI. Homepage category cards use the catalogue slugs for their `/shop?category=<slug>` links, and the shop query applies that category filter server-side before the existing client-side search. The mock data file remains in place for transition safety and should only be removed after all references are intentionally retired.
 
 ## Admin Architecture
 
 ### Current state
 
-`/admin` and its dashboard components do not currently exist. The authorization boundary exists in server helpers, and the database has the core product, inventory, category, and order models.
+The `/admin` route group now contains a protected layout and dashboard page. `src/components/admin/admin-shell.tsx` composes the desktop sidebar, header, and content area. `admin-sidebar.tsx` provides desktop navigation and a mobile Sheet drawer. `admin-header.tsx` displays the authenticated admin identity and uses the existing Better Auth client for sign-out.
+
+The current dashboard scope is intentionally limited to real database metrics: total products, total orders, low-stock inventory rows, total customers, and the five most recent orders. No CRUD workflows or future admin routes are implemented.
+
+The first administrator can be established by an operator with `npm run bootstrap:admin -- <existing-user-email>`. The server-side script looks up the existing user by email and updates only `role` to `ADMIN` and `status` to `ACTIVE`; it is not exposed as an HTTP route.
+
+The customer account route is a session-aware UI foundation at `/account`. It displays only identity supplied by the Better Auth session, provides sign-out for authenticated users, and shows a truthful unavailable-authentication state when no session is present. Customer order history and profile editing are not implemented.
 
 ### Planned MVP
 
@@ -307,7 +319,7 @@ Environment files and secrets are not architecture data and must remain outside 
 
 ### PLANNED / Not yet implemented
 
-- Admin dashboard and admin CRUD.
+- Admin CRUD and future admin workflows.
 - Database/local-cart reconciliation.
 - Pricing calculator and live metal-rate integration.
 - Online payment integration and order processing workflow.
@@ -315,17 +327,17 @@ Environment files and secrets are not architecture data and must remain outside 
 
 ## Current Sprint
 
-**Sprint 6: Product Foundation Transition**
+**Sprint 7: Admin Foundation**
 
-Completed in this position: **Sprint 6.1 - Controlled Product Schema Audit and Upgrade**, **Sprint 6.3 - Product Data Layer**, and **Sprint 6.4 - Dynamic Storefront**.
+Completed in this position: **Sprint 6.1 - Controlled Product Schema Audit and Upgrade**, **Sprint 6.3 - Product Data Layer**, **Sprint 6.4 - Dynamic Storefront**, **Sprint 7.1 - Admin Access & Route Protection**, and **Sprint 7.2 - Admin Dashboard Shell**.
 
-Remaining Sprint 6 work is catalogue data loading/normalization and any validation needed for the real catalogue.
+The current admin foundation is limited to protected `/admin` access, a responsive shell, and real read-only overview metrics.
 
 ## Planned Next Steps
 
 1. **Sprint 6.2:** Complete normalization/loading of the client's raw catalogue into internal product, audience, material, category, and variant data.
 2. Add server-authoritative pricing and checkout validation when the order/payment phase begins.
-3. **Sprint 7:** Build the premium admin dashboard against the shared product, inventory, order, and pricing system.
+3. Add admin product, category, inventory, and order workflows only in their dedicated future sprints.
 
 Each step that changes architecture, routes, models, state, integrations, or sprint status must update this document in the same task.
 
