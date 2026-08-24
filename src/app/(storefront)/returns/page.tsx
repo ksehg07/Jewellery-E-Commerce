@@ -9,7 +9,7 @@ export default function ReturnsPage() {
         </p>
 
         <h1 className="font-display text-4xl tracking-tight text-foreground sm:text-5xl">
-          A clear and considerate returns process.
+          A clear and considerate returns process!
         </h1>
 
         <div className="mt-8 space-y-8 text-base leading-7 text-muted-foreground">
