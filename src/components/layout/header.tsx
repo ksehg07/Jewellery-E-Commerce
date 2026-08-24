@@ -2,7 +2,6 @@ import Link from "next/link";
 
 import {
   Heart,
-  Search,
   User,
 } from "lucide-react";
 
@@ -10,6 +9,7 @@ import { siteConfig } from "@/config/site";
 import { CartTrigger } from "@/components/storefront/cart/cart-trigger";
 
 import { Container } from "./container";
+import { HeaderSearch } from "./header-search";
 import { MobileNavigation } from "./mobile-navigation";
 
 export function Header() {
@@ -52,13 +52,7 @@ export function Header() {
 
           {/* Actions */}
           <div className="flex items-center gap-1 sm:gap-2">
-            <button
-              type="button"
-              aria-label="Search"
-              className="inline-flex size-9 items-center justify-center rounded-md transition-colors hover:bg-secondary"
-            >
-              <Search className="size-5" />
-            </button>
+            <HeaderSearch />
 
             <button
               type="button"

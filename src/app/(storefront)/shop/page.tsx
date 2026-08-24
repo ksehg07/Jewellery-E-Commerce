@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+
 import { ShopClient } from "@/components/storefront/shop/shop-client";
 import { ShopHeader } from "@/components/storefront/shop/shop-header";
 
@@ -21,7 +23,9 @@ export default async function ShopPage({
     <>
       <ShopHeader productCount={products.length} />
 
-      <ShopClient products={products} />
+      <Suspense fallback={<div className="min-h-[300px]" />}>
+        <ShopClient products={products} />
+      </Suspense>
     </>
   );
 }

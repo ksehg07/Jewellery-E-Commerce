@@ -7,6 +7,8 @@ export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
+    // @ts-ignore: Prisma CLI requires this at runtime despite missing TS definition
+    seed: "npx tsx prisma/seed.ts",
   },
   datasource: {
     url: process.env["DATABASE_URL"],

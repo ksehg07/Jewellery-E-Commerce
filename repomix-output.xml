@@ -168,14 +168,25 @@ public/
   next.svg
   vercel.svg
   window.svg
+scripts/
+  promote-admin.ts
 src/
   app/
     (admin)/
       admin/
-        layout.tsx
+        dashboard/
+          layout.tsx
+          page.tsx
+        login/
+          page.tsx
+        setup/
+          page.tsx
         page.tsx
     (storefront)/
       about/
+        page.tsx
+      account/
+        account-actions.tsx
         page.tsx
       arrivals/
         page.tsx
@@ -214,8 +225,13 @@ src/
   components/
     admin/
       admin-header.tsx
+      admin-login-form.tsx
+      admin-setup-form.tsx
       admin-shell.tsx
       admin-sidebar.tsx
+    auth/
+      account-auth.tsx
+      sign-out-button.tsx
     layout/
       announcement-bar.tsx
       container.tsx
@@ -274,6 +290,7 @@ src/
       data/
         mock-products.ts
       queries/
+        get-categories.ts
         get-featured-products.ts
         get-new-arrivals.ts
         get-product-by-slug.ts
@@ -288,6 +305,7 @@ src/
       auth-client.ts
       auth.ts
       authorization.ts
+      bootstrap-admin.ts
       otp.ts
       password.ts
       require-admin.ts
@@ -332,758 +350,6 @@ tsconfig.json
 
 <files>
 This section contains the contents of the repository's files.
-
-<file path="src/app/(admin)/admin/layout.tsx">
-import type { ReactNode } from "react";
-
-import { AdminShell } from "@/components/admin/admin-shell";
-import { requireAdmin } from "@/lib/auth/require-admin";
-
-export default async function AdminLayout({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  const admin = await requireAdmin();
-
-  return (
-    <AdminShell adminName={admin.name || admin.email}>
-      {children}
-    </AdminShell>
-  );
-}
-</file>
-
-<file path="src/app/(admin)/admin/page.tsx">
-import {
-  AlertTriangle,
-  ClipboardList,
-  Package,
-  Users,
-} from "lucide-react";
-
-import { Badge } from "@/components/ui/badge";
-import { prisma } from "@/lib/prisma/client";
-import { UserRole } from "@/generated/prisma/client";
-
-const metricDefinitions = [
-  {
-    key: "products",
-    label: "Total products",
-    icon: Package,
-    tone: "text-accent",
-  },
-  {
-    key: "orders",
-    label: "Total orders",
-    icon: ClipboardList,
-    tone: "text-foreground",
-  },
-  {
-    key: "lowStock",
-    label: "Low stock",
-    icon: AlertTriangle,
-    tone: "text-destructive",
-  },
-  {
-    key: "customers",
-    label: "Total customers",
-    icon: Users,
-    tone: "text-foreground",
-  },
-] as const;
-
-export default async function AdminDashboardPage() {
-  const [totalProducts, totalOrders, lowStock, totalCustomers, recentOrders] =
-    await Promise.all([
-      prisma.product.count(),
-      prisma.order.count(),
-      prisma.inventory.count({
-        where: {
-          quantity: {
-            lte: prisma.inventory.fields.lowStockThreshold,
-          },
-        },
-      }),
-      prisma.user.count({
-        where: {
-          role: UserRole.CUSTOMER,
-        },
-      }),
-      prisma.order.findMany({
-        orderBy: {
-          createdAt: "desc",
-        },
-        take: 5,
-        select: {
-          id: true,
-          orderNumber: true,
-          total: true,
-          status: true,
-          createdAt: true,
-          user: {
-            select: {
-              name: true,
-              email: true,
-            },
-          },
-        },
-      }),
-    ]);
-
-  const metrics = {
-    products: totalProducts,
-    orders: totalOrders,
-    lowStock,
-    customers: totalCustomers,
-  };
-
-  return (
-    <div className="mx-auto max-w-7xl space-y-8">
-      <div>
-        <p className="text-sm text-muted-foreground">
-          A clear view of the store&apos;s current activity.
-        </p>
-      </div>
-
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {metricDefinitions.map((metric) => {
-          const Icon = metric.icon;
-
-          return (
-            <article
-              key={metric.key}
-              className="border border-border bg-card p-5"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                  {metric.label}
-                </p>
-                <Icon className={`size-5 ${metric.tone}`} />
-              </div>
-              <p className="mt-7 font-display text-4xl">
-                {metrics[metric.key].toLocaleString("en-IN")}
-              </p>
-            </article>
-          );
-        })}
-      </section>
-
-      <section className="border border-border bg-card">
-        <div className="flex items-center justify-between gap-4 border-b border-border px-5 py-4 sm:px-6">
-          <div>
-            <p className="text-xs uppercase tracking-[0.16em] text-accent">
-              Activity
-            </p>
-            <h2 className="mt-1 font-display text-2xl">Recent orders</h2>
-          </div>
-          <Badge variant="outline">Live data</Badge>
-        </div>
-
-        {recentOrders.length === 0 ? (
-          <div className="px-5 py-14 text-center sm:px-6">
-            <p className="font-display text-2xl">No orders yet</p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Recent customer orders will appear here.
-            </p>
-          </div>
-        ) : (
-          <div className="divide-y divide-border">
-            {recentOrders.map((order) => (
-              <div
-                key={order.id}
-                className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto_auto] sm:items-center sm:px-6"
-              >
-                <div>
-                  <p className="text-sm font-medium">{order.orderNumber}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {order.user.name} · {order.user.email}
-                  </p>
-                </div>
-                <div className="text-left sm:text-right">
-                  <p className="text-sm font-medium">
-                    ₹{Number(order.total).toLocaleString("en-IN")}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {order.createdAt.toLocaleDateString("en-IN")}
-                  </p>
-                </div>
-                <Badge variant="secondary">{order.status}</Badge>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-    </div>
-  );
-}
-</file>
-
-<file path="src/components/admin/admin-header.tsx">
-"use client";
-
-import { useRouter } from "next/navigation";
-
-import { LogOut } from "lucide-react";
-
-import { Button } from "@/components/ui/button";
-import { authClient } from "@/lib/auth/auth-client";
-
-import { MobileAdminSidebar } from "./admin-sidebar";
-
-type AdminHeaderProps = {
-  adminName: string;
-};
-
-export function AdminHeader({ adminName }: AdminHeaderProps) {
-  const router = useRouter();
-
-  async function handleSignOut() {
-    await authClient.signOut();
-    router.push("/");
-    router.refresh();
-  }
-
-  return (
-    <header className="flex min-h-20 items-center justify-between gap-4 border-b border-border px-4 sm:px-8">
-      <div className="flex items-center gap-3">
-        <MobileAdminSidebar />
-        <div>
-          <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-accent">
-            Overview
-          </p>
-          <h1 className="font-display text-2xl sm:text-3xl">Dashboard</h1>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-3">
-        <div className="hidden text-right sm:block">
-          <p className="text-sm font-medium">{adminName}</p>
-          <p className="text-xs text-muted-foreground">Administrator</p>
-        </div>
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={handleSignOut}
-          aria-label="Sign out"
-          title="Sign out"
-        >
-          <LogOut className="size-4" />
-        </Button>
-      </div>
-    </header>
-  );
-}
-</file>
-
-<file path="src/components/admin/admin-shell.tsx">
-import type { ReactNode } from "react";
-
-import { AdminHeader } from "./admin-header";
-import { AdminSidebar } from "./admin-sidebar";
-
-type AdminShellProps = {
-  adminName: string;
-  children: ReactNode;
-};
-
-export function AdminShell({ adminName, children }: AdminShellProps) {
-  return (
-    <div className="min-h-screen bg-background lg:flex">
-      <AdminSidebar />
-      <div className="min-w-0 flex-1">
-        <AdminHeader adminName={adminName} />
-        <main className="px-4 py-6 sm:px-8 sm:py-8">{children}</main>
-      </div>
-    </div>
-  );
-}
-</file>
-
-<file path="src/components/admin/admin-sidebar.tsx">
-"use client";
-
-import Link from "next/link";
-
-import {
-  Boxes,
-  ClipboardList,
-  LayoutDashboard,
-  Menu,
-  PackageSearch,
-  Settings,
-  Tags,
-} from "lucide-react";
-
-import { Separator } from "@/components/ui/separator";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
-import { siteConfig } from "@/config/site";
-
-const navigation = [
-  {
-    label: "Dashboard",
-    href: "/admin",
-    icon: LayoutDashboard,
-    available: true,
-  },
-  {
-    label: "Products",
-    icon: PackageSearch,
-    available: false,
-  },
-  {
-    label: "Categories",
-    icon: Tags,
-    available: false,
-  },
-  {
-    label: "Orders",
-    icon: ClipboardList,
-    available: false,
-  },
-  {
-    label: "Inventory",
-    icon: Boxes,
-    available: false,
-  },
-  {
-    label: "Settings",
-    icon: Settings,
-    available: false,
-  },
-] as const;
-
-function Navigation({ onNavigate }: { onNavigate?: () => void }) {
-  return (
-    <nav className="space-y-1" aria-label="Admin navigation">
-      {navigation.map((item) => {
-        const Icon = item.icon;
-
-        if (!item.available) {
-          return (
-            <span
-              key={item.label}
-              className="flex cursor-not-allowed items-center gap-3 px-3 py-2.5 text-sm text-muted-foreground/60"
-              aria-disabled="true"
-            >
-              <Icon className="size-4" />
-              <span>{item.label}</span>
-              <span className="ml-auto text-[10px] uppercase tracking-[0.16em]">
-                Soon
-              </span>
-            </span>
-          );
-        }
-
-        return (
-          <Link
-            key={item.label}
-            href={item.href}
-            onClick={onNavigate}
-            className="flex items-center gap-3 bg-secondary px-3 py-2.5 text-sm font-medium text-foreground"
-          >
-            <Icon className="size-4 text-accent" />
-            <span>{item.label}</span>
-          </Link>
-        );
-      })}
-    </nav>
-  );
-}
-
-export function AdminSidebar() {
-  return (
-    <aside className="hidden w-64 shrink-0 border-r border-border bg-card/40 lg:block">
-      <div className="sticky top-0 flex h-screen flex-col p-6">
-        <Link href="/admin" className="font-display text-3xl">
-          {siteConfig.name}
-        </Link>
-        <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
-          Admin workspace
-        </p>
-
-        <Separator className="my-8" />
-        <Navigation />
-      </div>
-    </aside>
-  );
-}
-
-export function MobileAdminSidebar() {
-  return (
-    <Sheet>
-      <SheetTrigger
-        className="inline-flex size-9 items-center justify-center border border-border lg:hidden"
-        aria-label="Open admin navigation"
-      >
-        <Menu className="size-4" />
-      </SheetTrigger>
-      <SheetContent side="left" className="w-72 p-6">
-        <SheetHeader className="p-0">
-          <SheetTitle className="font-display text-3xl font-normal">
-            {siteConfig.name}
-          </SheetTitle>
-          <p className="text-left text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
-            Admin workspace
-          </p>
-        </SheetHeader>
-        <Separator className="my-6" />
-        <Navigation />
-      </SheetContent>
-    </Sheet>
-  );
-}
-</file>
-
-<file path="src/lib/auth/require-admin.ts">
-import "server-only";
-
-import { redirect } from "next/navigation";
-
-import { UserRole, UserStatus } from "@/generated/prisma/client";
-import { prisma } from "@/lib/prisma/client";
-
-import { getSession } from "./session";
-
-export async function requireAdmin() {
-  const session = await getSession();
-
-  if (!session) {
-    redirect("/");
-  }
-
-  const user = await prisma.user.findUnique({
-    where: {
-      id: session.user.id,
-    },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-      status: true,
-    },
-  });
-
-  if (!user || user.status !== UserStatus.ACTIVE || user.role !== UserRole.ADMIN) {
-    redirect("/");
-  }
-
-  return user;
-}
-</file>
-
-<file path="AUTH_ACCESS_FIX_REPORT.md">
-# Authentication and Access Implementation Report
-
-**Implementation date/time:** 2026-08-23 13:32:29 +05:30 (local time)
-
-## Scope of Work
-
-This report covers the authentication and access surfaces inspected in the repository and the admin access work that is actually present:
-
-- Account 404 investigation/fix
-- Customer authentication investigation/implementation
-- Admin access investigation/fix
-- PostgreSQL SSL warning investigation
-
-The account and customer-authentication fixes were investigated but were not implemented in the reviewed repository state. Admin access protection and the admin dashboard shell were implemented in the preceding Sprint 7.1/7.2 work.
-
-## Inspection Findings
-
-### Routes found
-
-The App Router contains:
-
-- Customer storefront routes under `src/app/(storefront)/`, including `/`, `/shop`, `/product/[slug]`, `/cart`, `/checkout`, `/collections`, `/arrivals`, and informational pages.
-- Better Auth API route at `/api/auth/[...all]`, with GET and POST forwarded through Better Auth.
-- Protected admin route at `/admin`, under `src/app/(admin)/admin/`.
-- No `/account` page or route.
-- No `/login`, `/register`, or other customer authentication UI route.
-- No admin product, category, inventory, order, or settings routes.
-
-### Existing authentication architecture
-
-- Server session access is centralized in `src/lib/auth/session.ts` through `getSession()`, which calls `auth.api.getSession({ headers: await headers() })`.
-- `src/lib/auth/user.ts` provides `getCurrentUser()` and `requireUser()`.
-- `src/lib/auth/authorization.ts` provides active-user and role checks, including an exception-based `requireAdmin()` helper.
-- The Prisma client is server-only and uses the PostgreSQL adapter with `DATABASE_URL`.
-- Better Auth persistence uses the Prisma adapter and the `User`, `Account`, `Session`, and `Verification` models.
-
-### Better Auth configuration
-
-`src/lib/auth/auth.ts` configures:
-
-- Better Auth with the Prisma adapter.
-- PostgreSQL provider.
-- Existing user fields for `firstName`, `lastName`, `phone`, `phoneVerified`, `role`, and `status`.
-- Email OTP plugin with six-digit codes, five-minute expiry, and three allowed attempts.
-- In-memory rate limiting, including three OTP-send requests per 60 seconds for the OTP endpoint.
-- Resend-backed OTP delivery through the existing email transport.
-
-The browser client in `src/lib/auth/auth-client.ts` reuses Better Auth React APIs and the email OTP client plugin.
-
-### Existing admin authorization behavior
-
-Before the route-protection fix, the existing `authorization.ts` helper performed server-side checks but threw errors such as `UNAUTHENTICATED`, `ACCOUNT_INACTIVE`, and `FORBIDDEN`; it did not implement the required redirect behavior for an App Router layout.
-
-The implemented admin-specific helper, `src/lib/auth/require-admin.ts`, now:
-
-1. Reads the Better Auth session server-side.
-2. Redirects to `/` if there is no session.
-3. Loads the user from Prisma.
-4. Requires `role = ADMIN` and `status = ACTIVE`.
-5. Redirects to `/` for missing, inactive, or non-admin users.
-6. Returns the verified admin record to the protected admin layout.
-
-### Existing account/navigation behavior
-
-The desktop and mobile storefront headers contain links to `/account`. The route tree has no matching `/account` page. This is the confirmed source of the account navigation 404.
-
-## Root Causes Identified
-
-### Account 404
-
-**Confirmed root cause:** `src/components/layout/header.tsx` and `src/components/layout/mobile-navigation.tsx` link to `/account`, but no `/account` route exists under `src/app/`. The framework therefore resolves the navigation target as an unmatched route and renders the application not-found page.
-
-**Fix status:** Not fixed in the reviewed implementation. No account route was created because the admin-only sprint scope did not include customer account pages or new authentication routes.
-
-### `/admin` redirect
-
-**Confirmed reason:** The protected admin layout calls `src/lib/auth/require-admin.ts`. Requests without a valid Better Auth session, with no matching Prisma user, with a non-`ACTIVE` status, or with a role other than `ADMIN` are intentionally redirected to `/`.
-
-The repository has no login route, so there is currently no login page to which unauthenticated users can be redirected. The implementation uses the existing storefront home route as the fallback and records this limitation here and in `ARCHITECTURE.md`.
-
-### Authentication flow gaps
-
-- No customer login page exists.
-- No customer registration page exists.
-- No `/account` page exists.
-- Email OTP API handlers exist through Better Auth, but no customer-facing UI flow was found.
-- No first-admin bootstrap script or documented executable promotion command exists in the repository.
-- The existing `src/app/test-api.http` demonstrates OTP API requests, but it is not a customer authentication UI or production bootstrap mechanism.
-
-## Files Created
-
-These files were created for Sprint 7.1/7.2 and are part of the access implementation documented here:
-
-- `src/lib/auth/require-admin.ts` - Server-only redirecting admin authorization helper built on the existing Better Auth session and Prisma user record.
-- `src/app/(admin)/admin/layout.tsx` - Protects the `/admin` route group before rendering children.
-- `src/app/(admin)/admin/page.tsx` - Server-rendered admin overview with real database metrics and recent orders.
-- `src/components/admin/admin-shell.tsx` - Composes the admin sidebar, header, and responsive content area.
-- `src/components/admin/admin-sidebar.tsx` - Desktop sidebar and mobile Sheet navigation; only `/admin` is an active link and future areas are disabled.
-- `src/components/admin/admin-header.tsx` - Displays admin identity and performs sign-out through the existing Better Auth client.
-- `AUTH_ACCESS_FIX_REPORT.md` - This persistent implementation handover report.
-
-## Files Modified
-
-- `ARCHITECTURE.md` - Updated to document the protected admin route group, server authorization flow, admin shell structure, read-only dashboard scope, current sprint position, and the absence of a login route.
-
-No Better Auth configuration, Prisma schema, migrations, account route, login route, or storefront route was modified in this access implementation.
-
-## Authentication Implementation
-
-### Actual flow implemented
-
-- **Login route:** None exists. No `/login` route was created.
-- **OTP flow:** Better Auth exposes OTP endpoints through `/api/auth/[...all]`. The configured email OTP plugin sends OTP messages using Resend. No customer-facing OTP login page was implemented.
-- **Registration behavior:** No registration UI or custom registration flow exists in the reviewed repository. Better Auth remains the configured authentication foundation.
-- **Session creation:** Better Auth owns session creation after a successful authentication request. Server code reads the resulting session through `getSession()` and request headers.
-- **Logout behavior:** The admin header calls the existing `authClient.signOut()` API. On success it navigates to `/` and refreshes the route using Next.js client navigation.
-- **Account access behavior:** Header links point to `/account`, but the route is absent; access currently results in the application not-found page.
-- **Admin access behavior:** The admin layout calls `requireAdmin()` before rendering. Only an active Prisma user with `role = ADMIN` can reach the dashboard.
-- **Redirect behavior:** Unauthenticated, missing, inactive, and non-admin admin requests redirect to `/`. This is the existing public storefront home because no login route is present.
-
-## Better Auth Integration
-
-### APIs reused
-
-- `betterAuth(...)` in `src/lib/auth/auth.ts`.
-- `prismaAdapter(...)` for Prisma-backed persistence.
-- `emailOTP(...)` server plugin.
-- `emailOTPClient()` browser plugin.
-- `toNextJsHandler(auth)` for the App Router catch-all API route.
-- `auth.api.getSession(...)` through the existing `getSession()` helper.
-- `authClient.signOut()` in the admin header.
-
-### Version
-
-The installed package version is `better-auth` `^1.6.26`, as recorded in `package.json`. The Prisma adapter package is `@better-auth/prisma-adapter` `^1.6.26`.
-
-### Plugins reused
-
-- Better Auth email OTP server plugin.
-- Better Auth email OTP client plugin.
-- Resend transport and existing OTP email template.
-
-### Limitations
-
-- No customer authentication UI route exists.
-- Rate limiting uses process memory and is not shared across multiple application instances.
-- OTP delivery requires valid Resend configuration.
-- The admin guard checks the current Prisma user record in addition to the session, but no login redirect target exists.
-
-## Authorization Behavior
-
-The following is the expected behavior from the current code and route tree. Items marked **logical/code-level** were not all exercised through a live browser session in the reviewed work.
-
-| User state | `/account` | `/admin` |
-| --- | --- | --- |
-| Logged out | **Confirmed route gap:** unmatched route, application 404 | **Logical/code-level:** `requireAdmin()` redirects to `/` |
-| Authenticated `CUSTOMER` | **Untested/route gap:** no account page exists | **Logical/code-level:** role check redirects to `/` |
-| Authenticated `ADMIN` | **Untested/route gap:** no account page exists | **Logical/code-level:** active admin is allowed to render the dashboard |
-
-### Header navigation
-
-The admin shell contains a working `/admin` link. The storefront header still contains `/account` links, and those links continue to target a route that has not been created. Therefore account navigation is **not confirmed as fixed** and still requires a customer account implementation.
-
-## Admin Bootstrap Mechanism
-
-### Current status
-
-No first-admin bootstrap script, seed command, server action, API route, or migration was found. No user was promoted during the reviewed implementation, and no database credentials or personal user data are recorded here.
-
-### Required database result
-
-The first administrator must ultimately have:
-
-```text
-role = ADMIN
-status = ACTIVE
-```
-
-### Environment variable names
-
-The relevant existing environment variable names are:
-
-- `DATABASE_URL`
-- `RESEND_API_KEY`
-- `EMAIL_FROM`
-- `NEXT_PUBLIC_APP_URL`
-
-No values are included in this report.
-
-### Required commands
-
-There is currently no repository-provided promotion command that can be claimed as implemented. A future bootstrap implementation should define and document a controlled command or one-off server-side script, then verify the resulting user record. The existing project commands include `npx prisma validate`, `npx prisma generate`, and `npx prisma studio`; none of these alone automatically promotes a user to admin.
-
-## PostgreSQL SSL Warning Analysis
-
-### Detected warning
-
-During the Next.js build, the PostgreSQL driver emitted a security warning stating that SSL modes `prefer`, `require`, and `verify-ca` are currently treated as aliases for `verify-full`, with different standard libpq semantics planned for a future `pg`/`pg-connection-string` major release.
-
-### Change status
-
-The warning was **not changed**. No SSL adapter configuration or connection string was modified during the access work.
-
-### Assessment
-
-The warning is not a build failure and did not prevent Prisma validation or the production build. It is a compatibility/security configuration warning, not proof of a current connection failure. It is safely addressable later once the deployed Neon connection requirements and certificate policy are confirmed.
-
-### Recommended future action
-
-Review the Neon `DATABASE_URL` and explicitly choose the intended SSL behavior, preferably an explicit secure mode compatible with the deployment environment. If certificate verification requires custom trust material, configure the PostgreSQL adapter/CA handling deliberately. Validate the change against development, CI, and production before changing it.
-
-## Validation Results
-
-### Commands
-
-- `npx prisma validate` - **Passed.** Prisma loaded `prisma/schema.prisma` through `prisma.config.ts` and reported the schema valid.
-- `npm run build` - **Passed.** Next.js 16.3.0 compiled and generated routes including dynamic `/admin` and `/api/auth/[...all]`. The PostgreSQL SSL warning described above was emitted, but the build completed successfully.
-- `npm run lint` - **Passed.** ESLint completed without errors or warnings after the admin sign-out navigation used Next.js router navigation.
-
-### Logical/code-level route validation
-
-- Logged out `/account` - **Confirmed route gap:** no route exists; expected application 404.
-- Logged out `/admin` - **Logical/code-level:** server guard redirects to `/`.
-- Customer `/account` - **Not live-tested;** no account route exists.
-- Customer `/admin` - **Logical/code-level:** role/status guard redirects to `/`.
-- `ADMIN` `/admin` - **Logical/code-level:** active admin passes the guard and reaches the dashboard query/page.
-- Header navigation - **Partially confirmed:** `/admin` navigation is implemented; existing `/account` navigation still points to the missing account route.
-- Account navigation no longer causing custom 404 - **Not achieved:** account navigation still causes the existing custom not-found page because no `/account` route was implemented.
-
-No live authenticated browser/session test was performed in this reviewed work, so redirect behavior is recorded as logical/code-level validation rather than end-to-end confirmation.
-
-## Known Limitations / Possible Future Issues
-
-### Missing account route
-
-- **Possible issue:** `/account` remains an unmatched route.
-- **When it may occur:** Any user selects the account icon or mobile “My Account” navigation.
-- **Expected symptom/error:** The application custom 404 page is shown.
-- **Likely cause:** No `src/app/(storefront)/account/page.tsx` exists.
-- **Recommended debugging step:** Add a dedicated customer account sprint, create the route, then validate logged-out and authenticated behavior against the intended session policy.
-
-### Missing customer login UI
-
-- **Possible issue:** Customers have no browser page to initiate or complete OTP sign-in.
-- **When it may occur:** A user needs to authenticate for account or future protected customer workflows.
-- **Expected symptom/error:** No navigable login page; users cannot complete the API flow through the storefront UI.
-- **Likely cause:** Better Auth APIs exist, but no login route/component was created.
-- **Recommended debugging step:** Build a customer authentication route using the existing `authClient` OTP APIs and verify cookie/session creation end to end.
-
-### OTP delivery configuration
-
-- **Possible issue:** OTP email sending fails in an environment without valid Resend configuration.
-- **When it may occur:** A user requests an OTP outside a correctly configured development/production environment.
-- **Expected symptom/error:** Email delivery failure from the existing Resend transport.
-- **Likely cause:** Missing or invalid `RESEND_API_KEY` or `EMAIL_FROM`.
-- **Recommended debugging step:** Check environment variable presence and Resend sender/domain configuration without logging secrets.
-
-### In-memory rate limiting
-
-- **Possible issue:** OTP rate limits are not shared between application instances.
-- **When it may occur:** Horizontal scaling or multi-process deployment.
-- **Expected symptom/error:** Rate limits may be inconsistent between instances.
-- **Likely cause:** Better Auth is configured with `storage: "memory"`.
-- **Recommended debugging step:** Select a shared rate-limit store before scaling authentication horizontally.
-
-### Admin bootstrap is absent
-
-- **Possible issue:** The first admin cannot be promoted through a repository-provided workflow.
-- **When it may occur:** A fresh database has only customer users or no users.
-- **Expected symptom/error:** `/admin` redirects to `/` for every user.
-- **Likely cause:** No bootstrap script or controlled promotion command exists.
-- **Recommended debugging step:** Add a separately reviewed bootstrap procedure that sets exactly `role = ADMIN` and `status = ACTIVE`, then verify it against the target database.
-
-### PostgreSQL SSL configuration
-
-- **Possible issue:** Future `pg` or `pg-connection-string` major versions may interpret SSL modes differently.
-- **When it may occur:** Dependency upgrade or deployment using a connection string with an affected SSL mode.
-- **Expected symptom/error:** Changed certificate verification behavior or a connection/certificate error.
-- **Likely cause:** Current alias behavior differs from upcoming standard libpq semantics.
-- **Recommended debugging step:** Review the Neon connection string and explicitly test the chosen SSL mode before upgrading the driver.
-
-### Live authentication validation was unavailable
-
-- **Possible issue:** Cookie/session or redirect behavior could differ from the code-level expectation.
-- **When it may occur:** First browser test with real customer/admin accounts.
-- **Expected symptom/error:** Unexpected redirect, missing session, or failed sign-out.
-- **Likely cause:** No live authenticated browser session was exercised during this reviewed work.
-- **Recommended debugging step:** Test `/admin` with logged-out, customer, and active admin sessions against a configured database; inspect response redirects and Better Auth cookies without exposing values.
-
-## Changes Intentionally Not Made
-
-The following were deliberately excluded to preserve scope and avoid claiming unverified behavior:
-
-- No `/account` route or customer account UI.
-- No login, registration, or new authentication flow.
-- No Better Auth configuration changes.
-- No Prisma schema changes or migrations.
-- No admin product/category/inventory/order/settings CRUD.
-- No admin API routes or server actions.
-- No payment, metal-rate, invoice, wishlist, or review functionality.
-- No middleware, because the protected admin layout provides the required route boundary.
-- No PostgreSQL SSL configuration change, because the warning requires deployment-specific connection and certificate confirmation.
-- No database credentials, secrets, tokens, or personal email addresses included.
-</file>
 
 <file path=".agents/skills/prisma-cli/references/agent-safety.md">
 # AI safety checkpoint for destructive commands
@@ -13007,6 +12273,393 @@ export const catalogueCategories = [
 <svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill-rule="evenodd" clip-rule="evenodd" d="M1.5 2.5h13v10a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1zM0 1h16v11.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 0 12.5zm3.75 4.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5M7 4.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0m1.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5" fill="#666"/></svg>
 </file>
 
+<file path="scripts/promote-admin.ts">
+import "dotenv/config";
+
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "../src/generated/prisma/client";
+
+const email = process.argv[2]?.trim().toLowerCase();
+
+if (!email) {
+  console.error("Usage: npm run bootstrap:admin -- <existing-user-email>");
+  process.exit(1);
+}
+
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL!,
+});
+const prisma = new PrismaClient({ adapter });
+
+async function main() {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true, role: true, status: true },
+    });
+
+    if (!user) {
+      console.error("No user found for the supplied email.");
+      process.exitCode = 1;
+    } else {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          role: "ADMIN",
+          status: "ACTIVE",
+        },
+      });
+
+      console.log("User promoted successfully: role=ADMIN, status=ACTIVE.");
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+void main();
+</file>
+
+<file path="src/app/(admin)/admin/dashboard/layout.tsx">
+import type { ReactNode } from "react";
+
+import { AdminShell } from "@/components/admin/admin-shell";
+import { requireAdmin } from "@/lib/auth/require-admin";
+
+export default async function AdminDashboardLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const admin = await requireAdmin();
+
+  return (
+    <AdminShell adminName={admin.name || admin.email}>
+      {children}
+    </AdminShell>
+  );
+}
+</file>
+
+<file path="src/app/(admin)/admin/dashboard/page.tsx">
+import {
+  AlertTriangle,
+  ClipboardList,
+  Package,
+  Users,
+} from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { prisma } from "@/lib/prisma/client";
+import { UserRole } from "@/generated/prisma/client";
+
+const metricDefinitions = [
+  {
+    key: "products",
+    label: "Total products",
+    icon: Package,
+    tone: "text-accent",
+  },
+  {
+    key: "orders",
+    label: "Total orders",
+    icon: ClipboardList,
+    tone: "text-foreground",
+  },
+  {
+    key: "lowStock",
+    label: "Low stock",
+    icon: AlertTriangle,
+    tone: "text-destructive",
+  },
+  {
+    key: "customers",
+    label: "Total customers",
+    icon: Users,
+    tone: "text-foreground",
+  },
+] as const;
+
+export default async function AdminDashboardPage() {
+  const [totalProducts, totalOrders, lowStock, totalCustomers, recentOrders] =
+    await Promise.all([
+      prisma.product.count(),
+      prisma.order.count(),
+      prisma.inventory.count({
+        where: {
+          quantity: {
+            lte: prisma.inventory.fields.lowStockThreshold,
+          },
+        },
+      }),
+      prisma.user.count({
+        where: {
+          role: UserRole.CUSTOMER,
+        },
+      }),
+      prisma.order.findMany({
+        orderBy: {
+          createdAt: "desc",
+        },
+        take: 5,
+        select: {
+          id: true,
+          orderNumber: true,
+          total: true,
+          status: true,
+          createdAt: true,
+          user: {
+            select: {
+              name: true,
+              email: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+  const metrics = {
+    products: totalProducts,
+    orders: totalOrders,
+    lowStock,
+    customers: totalCustomers,
+  };
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-8">
+      <div>
+        <p className="text-sm text-muted-foreground">
+          A clear view of the store&apos;s current activity.
+        </p>
+      </div>
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {metricDefinitions.map((metric) => {
+          const Icon = metric.icon;
+
+          return (
+            <article
+              key={metric.key}
+              className="border border-border bg-card p-5"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                  {metric.label}
+                </p>
+                <Icon className={`size-5 ${metric.tone}`} />
+              </div>
+              <p className="mt-7 font-display text-4xl">
+                {metrics[metric.key].toLocaleString("en-IN")}
+              </p>
+            </article>
+          );
+        })}
+      </section>
+
+      <section className="border border-border bg-card">
+        <div className="flex items-center justify-between gap-4 border-b border-border px-5 py-4 sm:px-6">
+          <div>
+            <p className="text-xs uppercase tracking-[0.16em] text-accent">
+              Activity
+            </p>
+            <h2 className="mt-1 font-display text-2xl">Recent orders</h2>
+          </div>
+          <Badge variant="outline">Live data</Badge>
+        </div>
+
+        {recentOrders.length === 0 ? (
+          <div className="px-5 py-14 text-center sm:px-6">
+            <p className="font-display text-2xl">No orders yet</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Recent customer orders will appear here.
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {recentOrders.map((order) => (
+              <div
+                key={order.id}
+                className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto_auto] sm:items-center sm:px-6"
+              >
+                <div>
+                  <p className="text-sm font-medium">{order.orderNumber}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {order.user.name} · {order.user.email}
+                  </p>
+                </div>
+                <div className="text-left sm:text-right">
+                  <p className="text-sm font-medium">
+                    ₹{Number(order.total).toLocaleString("en-IN")}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {order.createdAt.toLocaleDateString("en-IN")}
+                  </p>
+                </div>
+                <Badge variant="secondary">{order.status}</Badge>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+</file>
+
+<file path="src/app/(admin)/admin/login/page.tsx">
+import { redirect } from "next/navigation";
+
+import { AdminLoginForm } from "@/components/admin/admin-login-form";
+import { UserRole, UserStatus } from "@/generated/prisma/client";
+import { prisma } from "@/lib/prisma/client";
+import { getSession } from "@/lib/auth/session";
+
+export default async function AdminLoginPage() {
+  const session = await getSession();
+
+  if (session) {
+    const user = await prisma.user.findUnique({
+      where: {
+        id: session.user.id,
+      },
+      select: {
+        role: true,
+        status: true,
+      },
+    });
+
+    if (
+      user?.role === UserRole.ADMIN &&
+      user.status === UserStatus.ACTIVE
+    ) {
+      redirect("/admin/dashboard");
+    }
+  }
+
+  const adminCount = await prisma.user.count({
+    where: {
+      role: UserRole.ADMIN,
+    },
+  });
+
+  if (adminCount === 0) {
+    redirect("/admin/setup");
+  }
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-background px-6">
+      <div className="w-full max-w-md">
+        <div className="border border-border bg-card p-8 shadow-sm sm:p-10">
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-accent">
+            NPJ Jewellery
+          </p>
+
+          <h1 className="mt-4 font-display text-4xl">
+            Admin workspace
+          </h1>
+
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            Sign in to manage the store.
+          </p>
+
+          <div className="mt-8">
+            <AdminLoginForm />
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="src/app/(admin)/admin/setup/page.tsx">
+import { redirect } from "next/navigation";
+
+import { AdminSetupForm } from "@/components/admin/admin-setup-form";
+import { UserRole } from "@/generated/prisma/client";
+import { prisma } from "@/lib/prisma/client";
+
+export default async function AdminSetupPage() {
+  const adminCount = await prisma.user.count({
+    where: {
+      role: UserRole.ADMIN,
+    },
+  });
+
+  if (adminCount > 0) {
+    redirect("/admin/login");
+  }
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-background px-6">
+      <div className="w-full max-w-md">
+        <div className="border border-border bg-card p-8 shadow-sm sm:p-10">
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-accent">
+            First-time setup
+          </p>
+
+          <h1 className="mt-4 font-display text-4xl">
+            Create administrator
+          </h1>
+
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            This setup is available only while the database has no
+            administrator.
+          </p>
+
+          <div className="mt-8">
+            <AdminSetupForm />
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="src/app/(admin)/admin/page.tsx">
+import { redirect } from "next/navigation";
+
+import { UserRole, UserStatus } from "@/generated/prisma/client";
+import { prisma } from "@/lib/prisma/client";
+import { getSession } from "@/lib/auth/session";
+
+export default async function AdminEntryPage() {
+  const session = await getSession();
+
+  if (session) {
+    const user = await prisma.user.findUnique({
+      where: {
+        id: session.user.id,
+      },
+      select: {
+        role: true,
+        status: true,
+      },
+    });
+
+    if (
+      user?.role === UserRole.ADMIN &&
+      user.status === UserStatus.ACTIVE
+    ) {
+      redirect("/admin/dashboard");
+    }
+  }
+
+  const adminCount = await prisma.user.count({
+    where: {
+      role: UserRole.ADMIN,
+    },
+  });
+
+  if (adminCount === 0) {
+    redirect("/admin/setup");
+  }
+
+  redirect("/admin/login");
+}
+</file>
+
 <file path="src/app/(storefront)/about/page.tsx">
 import Link from "next/link";
 
@@ -13094,6 +12747,312 @@ export default function AboutPage() {
         <Button asChild size="lg">
           <Link href="/shop">Explore Collection</Link>
         </Button>
+      </div>
+    </Container>
+  );
+}
+</file>
+
+<file path="src/app/(storefront)/account/account-actions.tsx">
+"use client";
+
+import { useRouter } from "next/navigation";
+
+import { Button } from "@/components/ui/button";
+import { authClient } from "@/lib/auth/auth-client";
+
+export function AccountActions() {
+  const router = useRouter();
+
+  async function handleSignOut() {
+    await authClient.signOut();
+    router.refresh();
+  }
+
+  return (
+    <Button variant="outline" onClick={handleSignOut}>
+      Sign out
+    </Button>
+  );
+}
+</file>
+
+<file path="src/app/(storefront)/account/page.tsx">
+import Link from "next/link";
+import {
+  ArrowRight,
+  Package,
+  ShoppingBag,
+  UserRound,
+} from "lucide-react";
+
+import { Container } from "@/components/layout/container";
+import { Button } from "@/components/ui/button";
+import { AccountAuth } from "@/components/auth/account-auth";
+import { SignOutButton } from "@/components/auth/sign-out-button";
+import { getSession } from "@/lib/auth/session";
+import { prisma } from "@/lib/prisma/client";
+
+export default async function AccountPage() {
+  const session = await getSession();
+
+  if (!session) {
+    return (
+      <Container className="py-16 sm:py-24">
+        <div className="mx-auto grid max-w-5xl overflow-hidden border border-border lg:grid-cols-[1fr_460px]">
+          <div className="hidden bg-muted/20 p-10 lg:flex lg:flex-col lg:justify-between">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.2em] text-accent">
+                NPJ Jewellery
+              </p>
+
+              <h1 className="mt-6 max-w-md font-display text-5xl leading-tight">
+                Your jewellery journey, all in one place.
+              </h1>
+
+              <p className="mt-6 max-w-md text-sm leading-7 text-muted-foreground">
+                Sign in to view your orders, manage your account,
+                and enjoy a seamless shopping experience.
+              </p>
+            </div>
+
+            <Link
+              href="/shop"
+              className="inline-flex items-center gap-2 text-sm font-medium"
+            >
+              Explore the collection
+              <ArrowRight className="size-4" />
+            </Link>
+          </div>
+
+          <div className="p-6 sm:p-10">
+            <AccountAuth />
+          </div>
+        </div>
+      </Container>
+    );
+  }
+
+  const user = await prisma.user.findUnique({
+    where: {
+      id: session.user.id,
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+      phone: true,
+      role: true,
+      status: true,
+      createdAt: true,
+    },
+  });
+
+  if (!user || user.status !== "ACTIVE") {
+    return (
+      <Container className="py-20">
+        <div className="mx-auto max-w-xl border border-border p-8 text-center">
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-accent">
+            Account unavailable
+          </p>
+
+          <h1 className="mt-4 font-display text-3xl">
+            We couldn't load your account.
+          </h1>
+
+          <p className="mt-4 text-sm leading-6 text-muted-foreground">
+            Please sign out and try signing in again.
+          </p>
+
+          <div className="mt-7">
+            <Link href="/">
+              <Button>Return home</Button>
+            </Link>
+          </div>
+        </div>
+      </Container>
+    );
+  }
+
+  const orders = await prisma.order.findMany({
+    where: {
+      userId: user.id,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    take: 5,
+    select: {
+      id: true,
+      orderNumber: true,
+      total: true,
+      status: true,
+      createdAt: true,
+    },
+  });
+
+  const displayName =
+    user.firstName ||
+    user.name ||
+    user.email.split("@")[0];
+
+  return (
+    <Container className="py-12 sm:py-16">
+      <div className="mx-auto max-w-6xl">
+        <div className="border-b border-border pb-8">
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-accent">
+            My Account
+          </p>
+
+          <div className="mt-3 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+            <div>
+              <h1 className="font-display text-4xl sm:text-5xl">
+                Welcome, {displayName}.
+              </h1>
+
+              <p className="mt-3 text-sm text-muted-foreground">
+                Manage your profile, orders, and account details.
+              </p>
+            </div>
+
+            <SignOutButton />
+          </div>
+        </div>
+
+        <div className="mt-8 grid gap-5 md:grid-cols-3">
+          <section className="border border-border p-6">
+            <UserRound className="size-5 text-accent" />
+
+            <h2 className="mt-5 font-display text-2xl">
+              Profile
+            </h2>
+
+            <div className="mt-5 space-y-3 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                  Name
+                </p>
+                <p className="mt-1">{user.name}</p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                  Email
+                </p>
+                <p className="mt-1">{user.email}</p>
+              </div>
+
+              {user.phone ? (
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                    Phone
+                  </p>
+                  <p className="mt-1">{user.phone}</p>
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <Link
+            href="/shop"
+            className="group border border-border p-6 transition-colors hover:bg-muted/20"
+          >
+            <ShoppingBag className="size-5 text-accent" />
+
+            <h2 className="mt-5 font-display text-2xl">
+              Continue Shopping
+            </h2>
+
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              Discover new pieces from our collection.
+            </p>
+
+            <div className="mt-6 flex items-center gap-2 text-sm font-medium">
+              Explore shop
+              <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
+            </div>
+          </Link>
+
+          <section className="border border-border p-6">
+            <Package className="size-5 text-accent" />
+
+            <h2 className="mt-5 font-display text-2xl">
+              Orders
+            </h2>
+
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              {orders.length === 0
+                ? "You haven't placed any orders yet."
+                : `${orders.length} recent order${orders.length === 1 ? "" : "s"} shown below.`}
+            </p>
+          </section>
+        </div>
+
+        <section className="mt-8 border border-border">
+          <div className="border-b border-border px-6 py-5">
+            <p className="text-xs font-medium uppercase tracking-[0.2em] text-accent">
+              Order history
+            </p>
+
+            <h2 className="mt-1 font-display text-2xl">
+              Recent orders
+            </h2>
+          </div>
+
+          {orders.length === 0 ? (
+            <div className="px-6 py-14 text-center">
+              <Package className="mx-auto size-7 text-muted-foreground" />
+
+              <p className="mt-4 font-display text-2xl">
+                No orders yet
+              </p>
+
+              <p className="mt-2 text-sm text-muted-foreground">
+                Your orders will appear here once you place one.
+              </p>
+
+              <div className="mt-6">
+                <Link href="/shop">
+                  <Button>
+                    Start shopping
+                    <ArrowRight className="size-4" />
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {orders.map((order) => (
+                <div
+                  key={order.id}
+                  className="flex flex-col gap-3 px-6 py-5 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div>
+                    <p className="font-medium">
+                      {order.orderNumber}
+                    </p>
+
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {order.createdAt.toLocaleDateString("en-IN")}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-6">
+                    <span className="text-sm">
+                      ₹{Number(order.total).toLocaleString("en-IN")}
+                    </span>
+
+                    <span className="text-xs uppercase tracking-wider text-muted-foreground">
+                      {order.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
     </Container>
   );
@@ -13818,6 +13777,803 @@ Content-Type: application/json
 {
   "email": "ksehgal2003@gmail.com",
   "otp": "554973"
+}
+</file>
+
+<file path="src/components/admin/admin-header.tsx">
+"use client";
+
+import { useRouter } from "next/navigation";
+
+import { LogOut } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { authClient } from "@/lib/auth/auth-client";
+
+import { MobileAdminSidebar } from "./admin-sidebar";
+
+type AdminHeaderProps = {
+  adminName: string;
+};
+
+export function AdminHeader({ adminName }: AdminHeaderProps) {
+  const router = useRouter();
+
+  async function handleSignOut() {
+    await authClient.signOut();
+    router.push("/");
+    router.refresh();
+  }
+
+  return (
+    <header className="flex min-h-20 items-center justify-between gap-4 border-b border-border px-4 sm:px-8">
+      <div className="flex items-center gap-3">
+        <MobileAdminSidebar />
+        <div>
+          <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-accent">
+            Overview
+          </p>
+          <h1 className="font-display text-2xl sm:text-3xl">Dashboard</h1>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <div className="hidden text-right sm:block">
+          <p className="text-sm font-medium">{adminName}</p>
+          <p className="text-xs text-muted-foreground">Administrator</p>
+        </div>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={handleSignOut}
+          aria-label="Sign out"
+          title="Sign out"
+        >
+          <LogOut className="size-4" />
+        </Button>
+      </div>
+    </header>
+  );
+}
+</file>
+
+<file path="src/components/admin/admin-login-form.tsx">
+"use client";
+
+import { FormEvent, useState } from "react";
+import { Loader2, LockKeyhole } from "lucide-react";
+import { useRouter } from "next/navigation";
+
+import { authClient } from "@/lib/auth/auth-client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+export function AdminLoginForm() {
+  const router = useRouter();
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setError("");
+    setLoading(true);
+
+    try {
+      const { error } = await authClient.signIn.email({
+        email: email.trim().toLowerCase(),
+        password,
+        rememberMe: true,
+      });
+
+      if (error) {
+        setError("Invalid administrator email or password.");
+        return;
+      }
+
+      router.push("/admin");
+      router.refresh();
+    } catch {
+      setError("Unable to sign in. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-5">
+      <div className="space-y-2">
+        <label htmlFor="admin-email" className="text-sm font-medium">
+          Email address
+        </label>
+
+        <Input
+          id="admin-email"
+          type="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          placeholder="admin@example.com"
+          autoComplete="email"
+          required
+        />
+      </div>
+
+      <div className="space-y-2">
+        <label htmlFor="admin-password" className="text-sm font-medium">
+          Password
+        </label>
+
+        <Input
+          id="admin-password"
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          placeholder="••••••••"
+          autoComplete="current-password"
+          required
+        />
+      </div>
+
+      {error ? (
+        <p className="text-sm text-destructive">{error}</p>
+      ) : null}
+
+      <Button
+        type="submit"
+        size="lg"
+        className="w-full"
+        disabled={loading}
+      >
+        {loading ? (
+          <>
+            <Loader2 className="size-4 animate-spin" />
+            Signing in...
+          </>
+        ) : (
+          <>
+            <LockKeyhole className="size-4" />
+            Sign in to admin
+          </>
+        )}
+      </Button>
+    </form>
+  );
+}
+</file>
+
+<file path="src/components/admin/admin-setup-form.tsx">
+"use client";
+
+import { FormEvent, useState } from "react";
+import { Loader2, ShieldCheck } from "lucide-react";
+import { useRouter } from "next/navigation";
+
+import { authClient } from "@/lib/auth/auth-client";
+import { bootstrapCurrentUserAsAdmin } from "@/lib/auth/bootstrap-admin";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+export function AdminSetupForm() {
+  const router = useRouter();
+
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [secret, setSecret] = useState("");
+
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setError("");
+    setLoading(true);
+
+    try {
+      const signup = await authClient.signUp.email({
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        password,
+      });
+
+      if (signup.error) {
+        setError(signup.error.message ?? "Unable to create administrator.");
+        return;
+      }
+
+      const admin = await bootstrapCurrentUserAsAdmin(secret);
+
+      if (!admin) {
+        setError("Administrator setup failed.");
+        return;
+      }
+
+      router.push("/admin");
+      router.refresh();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Administrator setup failed.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-5">
+      <div className="space-y-2">
+        <label htmlFor="admin-name" className="text-sm font-medium">
+          Administrator name
+        </label>
+
+        <Input
+          id="admin-name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Your name"
+          autoComplete="name"
+          required
+        />
+      </div>
+
+      <div className="space-y-2">
+        <label htmlFor="setup-email" className="text-sm font-medium">
+          Administrator email
+        </label>
+
+        <Input
+          id="setup-email"
+          type="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          placeholder="admin@example.com"
+          autoComplete="email"
+          required
+        />
+      </div>
+
+      <div className="space-y-2">
+        <label htmlFor="setup-password" className="text-sm font-medium">
+          Password
+        </label>
+
+        <Input
+          id="setup-password"
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          placeholder="Minimum 8 characters"
+          autoComplete="new-password"
+          minLength={8}
+          required
+        />
+      </div>
+
+      <div className="space-y-2">
+        <label htmlFor="bootstrap-secret" className="text-sm font-medium">
+          Bootstrap secret
+        </label>
+
+        <Input
+          id="bootstrap-secret"
+          type="password"
+          value={secret}
+          onChange={(event) => setSecret(event.target.value)}
+          placeholder="Enter your setup secret"
+          autoComplete="off"
+          required
+        />
+      </div>
+
+      {error ? (
+        <p className="text-sm text-destructive">{error}</p>
+      ) : null}
+
+      <Button
+        type="submit"
+        size="lg"
+        className="w-full"
+        disabled={loading}
+      >
+        {loading ? (
+          <>
+            <Loader2 className="size-4 animate-spin" />
+            Creating administrator...
+          </>
+        ) : (
+          <>
+            <ShieldCheck className="size-4" />
+            Create administrator
+          </>
+        )}
+      </Button>
+    </form>
+  );
+}
+</file>
+
+<file path="src/components/admin/admin-shell.tsx">
+import type { ReactNode } from "react";
+
+import { AdminHeader } from "./admin-header";
+import { AdminSidebar } from "./admin-sidebar";
+
+type AdminShellProps = {
+  adminName: string;
+  children: ReactNode;
+};
+
+export function AdminShell({ adminName, children }: AdminShellProps) {
+  return (
+    <div className="min-h-screen bg-background lg:flex">
+      <AdminSidebar />
+      <div className="min-w-0 flex-1">
+        <AdminHeader adminName={adminName} />
+        <main className="px-4 py-6 sm:px-8 sm:py-8">{children}</main>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="src/components/admin/admin-sidebar.tsx">
+"use client";
+
+import Link from "next/link";
+
+import {
+  Boxes,
+  ClipboardList,
+  LayoutDashboard,
+  Menu,
+  PackageSearch,
+  Settings,
+  Tags,
+} from "lucide-react";
+
+import { Separator } from "@/components/ui/separator";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import { siteConfig } from "@/config/site";
+
+const navigation = [
+  {
+    label: "Dashboard",
+    href: "/admin",
+    icon: LayoutDashboard,
+    available: true,
+  },
+  {
+    label: "Products",
+    icon: PackageSearch,
+    available: false,
+  },
+  {
+    label: "Categories",
+    icon: Tags,
+    available: false,
+  },
+  {
+    label: "Orders",
+    icon: ClipboardList,
+    available: false,
+  },
+  {
+    label: "Inventory",
+    icon: Boxes,
+    available: false,
+  },
+  {
+    label: "Settings",
+    icon: Settings,
+    available: false,
+  },
+] as const;
+
+function Navigation({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <nav className="space-y-1" aria-label="Admin navigation">
+      {navigation.map((item) => {
+        const Icon = item.icon;
+
+        if (!item.available) {
+          return (
+            <span
+              key={item.label}
+              className="flex cursor-not-allowed items-center gap-3 px-3 py-2.5 text-sm text-muted-foreground/60"
+              aria-disabled="true"
+            >
+              <Icon className="size-4" />
+              <span>{item.label}</span>
+              <span className="ml-auto text-[10px] uppercase tracking-[0.16em]">
+                Soon
+              </span>
+            </span>
+          );
+        }
+
+        return (
+          <Link
+            key={item.label}
+            href={item.href}
+            onClick={onNavigate}
+            className="flex items-center gap-3 bg-secondary px-3 py-2.5 text-sm font-medium text-foreground"
+          >
+            <Icon className="size-4 text-accent" />
+            <span>{item.label}</span>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+export function AdminSidebar() {
+  return (
+    <aside className="hidden w-64 shrink-0 border-r border-border bg-card/40 lg:block">
+      <div className="sticky top-0 flex h-screen flex-col p-6">
+        <Link href="/admin" className="font-display text-3xl">
+          {siteConfig.name}
+        </Link>
+        <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+          Admin workspace
+        </p>
+
+        <Separator className="my-8" />
+        <Navigation />
+      </div>
+    </aside>
+  );
+}
+
+export function MobileAdminSidebar() {
+  return (
+    <Sheet>
+      <SheetTrigger
+        className="inline-flex size-9 items-center justify-center border border-border lg:hidden"
+        aria-label="Open admin navigation"
+      >
+        <Menu className="size-4" />
+      </SheetTrigger>
+      <SheetContent side="left" className="w-72 p-6">
+        <SheetHeader className="p-0">
+          <SheetTitle className="font-display text-3xl font-normal">
+            {siteConfig.name}
+          </SheetTitle>
+          <p className="text-left text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+            Admin workspace
+          </p>
+        </SheetHeader>
+        <Separator className="my-6" />
+        <Navigation />
+      </SheetContent>
+    </Sheet>
+  );
+}
+</file>
+
+<file path="src/components/auth/account-auth.tsx">
+"use client";
+
+import { FormEvent, useState } from "react";
+import { ArrowRight, Check, Loader2, Mail } from "lucide-react";
+import { useRouter } from "next/navigation";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { authClient } from "@/lib/auth/auth-client";
+
+type Step = "email" | "otp";
+
+export function AccountAuth() {
+  const router = useRouter();
+
+  const [step, setStep] = useState<Step>("email");
+  const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState("");
+
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const [isLoading, setIsLoading] = useState(false);
+
+  async function handleSendOtp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setError("");
+    setMessage("");
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail) {
+      setError("Please enter your email address.");
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const { error } =
+        await authClient.emailOtp.sendVerificationOtp({
+          email: normalizedEmail,
+          type: "sign-in",
+        });
+
+      if (error) {
+        setError(error.message || "Unable to send verification code.");
+        return;
+      }
+
+      setEmail(normalizedEmail);
+      setStep("otp");
+      setMessage("We've sent a six-digit verification code to your email.");
+    } catch {
+      setError("Something went wrong. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleVerifyOtp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setError("");
+    setMessage("");
+
+    if (!otp || otp.length !== 6) {
+      setError("Please enter the six-digit verification code.");
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const { error } = await authClient.signIn.emailOtp({
+        email,
+        otp,
+        name: name.trim() || undefined,
+      });
+
+      if (error) {
+        setError(error.message || "Invalid or expired verification code.");
+        return;
+      }
+
+      router.push("/account");
+      router.refresh();
+    } catch {
+      setError("Unable to sign you in. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  if (step === "otp") {
+    return (
+      <div className="space-y-6">
+        <div className="flex size-12 items-center justify-center rounded-full border border-border bg-muted/30">
+          <Check className="size-5 text-accent" />
+        </div>
+
+        <div>
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-accent">
+            Verify your email
+          </p>
+
+          <h2 className="mt-3 font-display text-3xl">
+            Enter your verification code.
+          </h2>
+
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            We sent a six-digit code to{" "}
+            <span className="font-medium text-foreground">{email}</span>.
+          </p>
+        </div>
+
+        <form onSubmit={handleVerifyOtp} className="space-y-5">
+          <div className="space-y-2">
+            <label
+              htmlFor="name"
+              className="text-sm font-medium"
+            >
+              Your name
+              <span className="ml-1 text-muted-foreground">
+                (optional)
+              </span>
+            </label>
+
+            <Input
+              id="name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Your name"
+              autoComplete="name"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label
+              htmlFor="otp"
+              className="text-sm font-medium"
+            >
+              Verification code
+            </label>
+
+            <Input
+              id="otp"
+              value={otp}
+              onChange={(event) =>
+                setOtp(
+                  event.target.value
+                    .replace(/\D/g, "")
+                    .slice(0, 6),
+                )
+              }
+              placeholder="000000"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              className="text-center text-lg tracking-[0.4em]"
+            />
+          </div>
+
+          {error ? (
+            <p className="text-sm text-destructive">{error}</p>
+          ) : null}
+
+          {message ? (
+            <p className="text-sm text-muted-foreground">
+              {message}
+            </p>
+          ) : null}
+
+          <Button
+            type="submit"
+            size="lg"
+            className="w-full"
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="size-4 animate-spin" />
+                Verifying...
+              </>
+            ) : (
+              <>
+                Continue
+                <ArrowRight className="size-4" />
+              </>
+            )}
+          </Button>
+        </form>
+
+        <button
+          type="button"
+          onClick={() => {
+            setStep("email");
+            setOtp("");
+            setError("");
+            setMessage("");
+          }}
+          className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        >
+          Use a different email
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex size-12 items-center justify-center rounded-full border border-border bg-muted/30">
+        <Mail className="size-5 text-accent" />
+      </div>
+
+      <div>
+        <p className="text-xs font-medium uppercase tracking-[0.2em] text-accent">
+          Customer account
+        </p>
+
+        <h2 className="mt-3 font-display text-3xl">
+          Welcome to your account.
+        </h2>
+
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          Enter your email and we'll send you a secure verification
+          code. No password required.
+        </p>
+      </div>
+
+      <form onSubmit={handleSendOtp} className="space-y-5">
+        <div className="space-y-2">
+          <label
+            htmlFor="email"
+            className="text-sm font-medium"
+          >
+            Email address
+          </label>
+
+          <Input
+            id="email"
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="you@example.com"
+            autoComplete="email"
+            required
+          />
+        </div>
+
+        {error ? (
+          <p className="text-sm text-destructive">{error}</p>
+        ) : null}
+
+        <Button
+          type="submit"
+          size="lg"
+          className="w-full"
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <>
+              <Loader2 className="size-4 animate-spin" />
+              Sending code...
+            </>
+          ) : (
+            <>
+              Continue with email
+              <ArrowRight className="size-4" />
+            </>
+          )}
+        </Button>
+      </form>
+
+      <p className="text-xs leading-5 text-muted-foreground">
+        By continuing, you agree to use your email address for
+        authentication and account-related communication.
+      </p>
+    </div>
+  );
+}
+</file>
+
+<file path="src/components/auth/sign-out-button.tsx">
+"use client";
+
+import { useRouter } from "next/navigation";
+
+import { authClient } from "@/lib/auth/auth-client";
+
+export function SignOutButton() {
+  const router = useRouter();
+
+  async function handleSignOut() {
+    await authClient.signOut();
+    router.push("/");
+    router.refresh();
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleSignOut}
+      className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+    >
+      Sign out
+    </button>
+  );
 }
 </file>
 
@@ -14729,82 +15485,6 @@ export function OrderSummary() {
         </div>
       </div>
     </aside>
-  );
-}
-</file>
-
-<file path="src/components/storefront/home/categories.tsx">
-import Image from "next/image";
-import Link from "next/link";
-
-import { ArrowUpRight } from "lucide-react";
-
-import { Container } from "@/components/layout/container";
-
-import { SectionHeading } from "./section-heading";
-
-const categories = [
-  {
-    name: "Rings",
-    image: "/images/categories/rings.jpg",
-    href: "/shop?category=rings",
-  },
-  {
-    name: "Earrings",
-    image: "/images/categories/earrings.jpg",
-    href: "/shop?category=earrings",
-  },
-  {
-    name: "Necklaces",
-    image: "/images/categories/necklaces.jpg",
-    href: "/shop?category=necklaces",
-  },
-  {
-    name: "Bracelets",
-    image: "/images/categories/bracelets.jpg",
-    href: "/shop?category=bracelets",
-  },
-];
-
-export function Categories() {
-  return (
-    <section className="py-20 sm:py-24">
-      <Container>
-        <SectionHeading
-          eyebrow="Explore"
-          title="Find your perfect piece."
-          description="Discover jewellery designed for everyday elegance and unforgettable celebrations."
-        />
-
-        <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {categories.map((category) => (
-            <Link
-              key={category.name}
-              href={category.href}
-              className="group relative aspect-[4/5] overflow-hidden bg-secondary"
-            >
-              <Image
-                src={category.image}
-                alt={category.name}
-                fill
-                className="object-cover transition-transform duration-500 group-hover:scale-105"
-                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
-              />
-
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
-
-              <div className="absolute inset-x-0 bottom-0 flex items-center justify-between p-5 text-white">
-                <h3 className="font-display text-3xl">
-                  {category.name}
-                </h3>
-
-                <ArrowUpRight className="size-5 transition-transform duration-300 group-hover:-translate-y-1 group-hover:translate-x-1" />
-              </div>
-            </Link>
-          ))}
-        </div>
-      </Container>
-    </section>
   );
 }
 </file>
@@ -16126,6 +16806,27 @@ export const mockProducts: MockProduct[] = [
 ];
 </file>
 
+<file path="src/features/products/queries/get-categories.ts">
+import "server-only";
+
+import { prisma } from "@/lib/prisma/client";
+
+export async function getCategories() {
+  return prisma.category.findMany({
+    orderBy: {
+      name: "asc",
+    },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      description: true,
+      image: true,
+    },
+  });
+}
+</file>
+
 <file path="src/features/products/queries/get-featured-products.ts">
 import "server-only";
 
@@ -16208,47 +16909,6 @@ export async function getProductBySlug(
   });
 
   return product ? mapProduct(product) : null;
-}
-</file>
-
-<file path="src/features/products/queries/get-products.ts">
-import "server-only";
-
-import type { Prisma } from "@/generated/prisma/client";
-
-import { prisma } from "@/lib/prisma/client";
-
-import {
-  mapProducts,
-  productInclude,
-} from "../utils/product-mappers";
-import type { StorefrontProduct } from "../types/product";
-
-type GetProductsOptions = {
-  categoryId?: string;
-  collectionId?: string;
-  limit?: number;
-};
-
-export async function getProducts(
-  options: GetProductsOptions = {},
-): Promise<StorefrontProduct[]> {
-  const where: Prisma.ProductWhereInput = {
-    isActive: true,
-    ...(options.categoryId ? { categoryId: options.categoryId } : {}),
-    ...(options.collectionId ? { collectionId: options.collectionId } : {}),
-  };
-
-  const products = await prisma.product.findMany({
-    where,
-    include: productInclude,
-    orderBy: {
-      createdAt: "desc",
-    },
-    ...(options.limit ? { take: options.limit } : {}),
-  });
-
-  return mapProducts(products);
 }
 </file>
 
@@ -16418,101 +17078,6 @@ export const authClient = createAuthClient({
 });
 </file>
 
-<file path="src/lib/auth/auth.ts">
-import { betterAuth } from "better-auth";
-import { prismaAdapter } from "better-auth/adapters/prisma";
-import { emailOTP } from "better-auth/plugins";
-
-import { prisma } from "@/lib/prisma/client";
-import { sendEmail } from "@/lib/email/send-email";
-import { otpEmailTemplate } from "@/lib/email/templates";
-
-export const auth = betterAuth({
-  database: prismaAdapter(prisma, {
-    provider: "postgresql",
-  }),
-
-  user: {
-    modelName: "User",
-
-    additionalFields: {
-      firstName: {
-        type: "string",
-        required: false,
-        input: true,
-      },
-
-      lastName: {
-        type: "string",
-        required: false,
-        input: true,
-      },
-
-      phone: {
-        type: "string",
-        required: false,
-        input: true,
-      },
-
-      phoneVerified: {
-        type: "boolean",
-        required: false,
-        defaultValue: false,
-        input: false,
-      },
-
-      role: {
-        type: "string",
-        required: false,
-        defaultValue: "CUSTOMER",
-        input: false,
-      },
-
-      status: {
-        type: "string",
-        required: false,
-        defaultValue: "ACTIVE",
-        input: false,
-      },
-    },
-  },
-
-  rateLimit: {
-    enabled: true,
-    storage: "memory",
-
-    customRules: {
-      "/email-otp/send-verification-otp": {
-        window: 60,
-        max: 3,
-      },
-    },
-  },
-
-  plugins: [
-    emailOTP({
-      otpLength: 6,
-      expiresIn: 300,
-      allowedAttempts: 3,
-
-      async sendVerificationOTP({ email, otp, type }) {
-        const template = otpEmailTemplate({
-          otp,
-          type,
-        });
-
-        await sendEmail({
-          to: email,
-          subject: template.subject,
-          html: template.html,
-          text: template.text,
-        });
-      },
-    }),
-  ],
-});
-</file>
-
 <file path="src/lib/auth/authorization.ts">
 import "server-only";
 
@@ -16563,12 +17128,108 @@ export async function requireAdmin() {
 }
 </file>
 
+<file path="src/lib/auth/bootstrap-admin.ts">
+"use server";
+
+import { UserRole, UserStatus } from "@/generated/prisma/client";
+import { prisma } from "@/lib/prisma/client";
+import { getSession } from "./session";
+
+export async function bootstrapCurrentUserAsAdmin(
+  bootstrapSecret: string,
+) {
+  if (!process.env.ADMIN_BOOTSTRAP_SECRET) {
+    throw new Error("ADMIN_BOOTSTRAP_SECRET is not configured.");
+  }
+
+  if (bootstrapSecret !== process.env.ADMIN_BOOTSTRAP_SECRET) {
+    throw new Error("Invalid bootstrap secret.");
+  }
+
+  const session = await getSession();
+
+  if (!session) {
+    throw new Error("You must be signed in first.");
+  }
+
+  const existingAdmin = await prisma.user.count({
+    where: {
+      role: UserRole.ADMIN,
+    },
+  });
+
+  if (existingAdmin > 0) {
+    throw new Error("An administrator already exists.");
+  }
+
+  const user = await prisma.user.update({
+    where: {
+      id: session.user.id,
+    },
+    data: {
+      role: UserRole.ADMIN,
+      status: UserStatus.ACTIVE,
+    },
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      status: true,
+    },
+  });
+
+  return user;
+}
+</file>
+
 <file path="src/lib/auth/otp.ts">
 
 </file>
 
 <file path="src/lib/auth/password.ts">
 
+</file>
+
+<file path="src/lib/auth/require-admin.ts">
+import "server-only";
+
+import { redirect } from "next/navigation";
+
+import { UserRole, UserStatus } from "@/generated/prisma/client";
+import { prisma } from "@/lib/prisma/client";
+
+import { getSession } from "./session";
+
+export async function requireAdmin() {
+  const session = await getSession();
+
+  if (!session) {
+    redirect("/admin/login");
+  }
+
+  const user = await prisma.user.findUnique({
+    where: {
+      id: session.user.id,
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      status: true,
+    },
+  });
+
+  if (
+    !user ||
+    user.status !== UserStatus.ACTIVE ||
+    user.role !== UserRole.ADMIN
+  ) {
+    redirect("/");
+  }
+
+  return user;
+}
 </file>
 
 <file path="src/lib/auth/session.ts">
@@ -16770,6 +17431,325 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+</file>
+
+<file path="AUTH_ACCESS_FIX_REPORT.md">
+# Authentication and Access Implementation Report
+
+**Implementation date/time:** 2026-08-23 13:32:29 +05:30 (local time)
+
+## Scope of Work
+
+This report covers the authentication and access surfaces inspected in the repository and the admin access work that is actually present:
+
+- Account 404 investigation/fix
+- Customer authentication investigation/implementation
+- Admin access investigation/fix
+- PostgreSQL SSL warning investigation
+
+The account route foundation and admin bootstrap mechanism are now implemented. A complete customer login UI remains outside this task. Admin access protection and the admin dashboard shell were implemented in the preceding Sprint 7.1/7.2 work.
+
+## Inspection Findings
+
+### Routes found
+
+The App Router contains:
+
+- Customer storefront routes under `src/app/(storefront)/`, including `/`, `/shop`, `/product/[slug]`, `/cart`, `/checkout`, `/collections`, `/arrivals`, and informational pages.
+- Better Auth API route at `/api/auth/[...all]`, with GET and POST forwarded through Better Auth.
+- Protected admin route at `/admin`, under `src/app/(admin)/admin/`.
+- `/account` customer account foundation.
+- No `/login`, `/register`, or other customer authentication UI route.
+- No admin product, category, inventory, order, or settings routes.
+
+### Existing authentication architecture
+
+- Server session access is centralized in `src/lib/auth/session.ts` through `getSession()`, which calls `auth.api.getSession({ headers: await headers() })`.
+- `src/lib/auth/user.ts` provides `getCurrentUser()` and `requireUser()`.
+- `src/lib/auth/authorization.ts` provides active-user and role checks, including an exception-based `requireAdmin()` helper.
+- The Prisma client is server-only and uses the PostgreSQL adapter with `DATABASE_URL`.
+- Better Auth persistence uses the Prisma adapter and the `User`, `Account`, `Session`, and `Verification` models.
+
+### Better Auth configuration
+
+`src/lib/auth/auth.ts` configures:
+
+- Better Auth with the Prisma adapter.
+- PostgreSQL provider.
+- Existing user fields for `firstName`, `lastName`, `phone`, `phoneVerified`, `role`, and `status`.
+- Email OTP plugin with six-digit codes, five-minute expiry, and three allowed attempts.
+- In-memory rate limiting, including three OTP-send requests per 60 seconds for the OTP endpoint.
+- Resend-backed OTP delivery through the existing email transport.
+
+The browser client in `src/lib/auth/auth-client.ts` reuses Better Auth React APIs and the email OTP client plugin.
+
+### Existing admin authorization behavior
+
+Before the route-protection fix, the existing `authorization.ts` helper performed server-side checks but threw errors such as `UNAUTHENTICATED`, `ACCOUNT_INACTIVE`, and `FORBIDDEN`; it did not implement the required redirect behavior for an App Router layout.
+
+The implemented admin-specific helper, `src/lib/auth/require-admin.ts`, now:
+
+1. Reads the Better Auth session server-side.
+2. Redirects to `/` if there is no session.
+3. Loads the user from Prisma.
+4. Requires `role = ADMIN` and `status = ACTIVE`.
+5. Redirects to `/` for missing, inactive, or non-admin users.
+6. Returns the verified admin record to the protected admin layout.
+
+### Existing account/navigation behavior
+
+The desktop and mobile storefront headers contain links to `/account`. The route now exists under the storefront route group and renders a session-aware account foundation.
+
+## Root Causes Identified
+
+### Account 404
+
+**Confirmed root cause at the time of the original incident:** `src/components/layout/header.tsx` and `src/components/layout/mobile-navigation.tsx` linked to `/account` while no `/account` route existed under `src/app/`. The framework therefore resolved the navigation target as an unmatched route and rendered the application not-found page.
+
+**Fix status:** Fixed for routing: `src/app/(storefront)/account/page.tsx` now resolves `/account`. It renders session-provided identity when authenticated and a truthful unavailable-authentication state otherwise. Full account history and login UI remain unimplemented.
+
+### `/admin` redirect
+
+**Confirmed reason:** The protected admin layout calls `src/lib/auth/require-admin.ts`. Requests without a valid Better Auth session, with no matching Prisma user, with a non-`ACTIVE` status, or with a role other than `ADMIN` are intentionally redirected to `/`.
+
+The repository has no login route, so there is currently no login page to which unauthenticated users can be redirected. The implementation uses the existing storefront home route as the fallback and records this limitation here and in `ARCHITECTURE.md`.
+
+### Authentication flow gaps
+
+- No customer login page exists.
+- No customer registration page exists.
+- Account profile/order backend presentation is partial; only session identity is currently shown.
+- Email OTP API handlers exist through Better Auth, but no customer-facing UI flow was found.
+- `scripts/promote-admin.ts` now provides a documented executable promotion command.
+- The existing `src/app/test-api.http` demonstrates OTP API requests, but it is not a customer authentication UI or production bootstrap mechanism.
+
+## Files Created
+
+These files are part of the access implementation documented here:
+
+- `src/lib/auth/require-admin.ts` - Server-only redirecting admin authorization helper built on the existing Better Auth session and Prisma user record.
+- `src/app/(admin)/admin/layout.tsx` - Protects the `/admin` route group before rendering children.
+- `src/app/(admin)/admin/page.tsx` - Server-rendered admin overview with real database metrics and recent orders.
+- `src/components/admin/admin-shell.tsx` - Composes the admin sidebar, header, and responsive content area.
+- `src/components/admin/admin-sidebar.tsx` - Desktop sidebar and mobile Sheet navigation; only `/admin` is an active link and future areas are disabled.
+- `src/components/admin/admin-header.tsx` - Displays admin identity and performs sign-out through the existing Better Auth client.
+- `src/app/(storefront)/account/page.tsx` - Session-aware customer account UI foundation.
+- `src/app/(storefront)/account/account-actions.tsx` - Client-side sign-out action for authenticated account users.
+- `scripts/promote-admin.ts` - Operator-only existing-user promotion script.
+- `AUTH_ACCESS_FIX_REPORT.md` - This persistent implementation handover report.
+
+## Files Modified
+
+- `ARCHITECTURE.md` - Updated to document the protected admin route group, server authorization flow, admin shell structure, read-only dashboard scope, current sprint position, and the absence of a login route.
+- `package.json` - Added the `bootstrap:admin` command and the `tsx` development dependency required to execute the TypeScript Prisma script.
+- `package-lock.json` - Updated by the dependency installation for `tsx`.
+
+No Better Auth configuration, Prisma schema, migrations, account route, login route, or storefront route was modified in this access implementation.
+
+## Authentication Implementation
+
+### Actual flow implemented
+
+- **Login route:** None exists. No `/login` route was created.
+- **OTP flow:** Better Auth exposes OTP endpoints through `/api/auth/[...all]`. The configured email OTP plugin sends OTP messages using Resend. No customer-facing OTP login page was implemented.
+- **Registration behavior:** No registration UI or custom registration flow exists in the reviewed repository. Better Auth remains the configured authentication foundation.
+- **Session creation:** Better Auth owns session creation after a successful authentication request. Server code reads the resulting session through `getSession()` and request headers.
+- **Logout behavior:** The admin header calls the existing `authClient.signOut()` API. On success it navigates to `/` and refreshes the route using Next.js client navigation.
+- **Account access behavior:** Header links point to `/account`, which now resolves through the storefront route group. The page reads the server session and renders only available identity data; order history is an explicit future state.
+- **Admin access behavior:** The admin layout calls `requireAdmin()` before rendering. Only an active Prisma user with `role = ADMIN` can reach the dashboard.
+- **Redirect behavior:** Unauthenticated, missing, inactive, and non-admin admin requests redirect to `/`. This is the existing public storefront home because no login route is present.
+
+## Better Auth Integration
+
+### APIs reused
+
+- `betterAuth(...)` in `src/lib/auth/auth.ts`.
+- `prismaAdapter(...)` for Prisma-backed persistence.
+- `emailOTP(...)` server plugin.
+- `emailOTPClient()` browser plugin.
+- `toNextJsHandler(auth)` for the App Router catch-all API route.
+- `auth.api.getSession(...)` through the existing `getSession()` helper.
+- `authClient.signOut()` in the admin header.
+
+### Version
+
+The installed package version is `better-auth` `^1.6.26`, as recorded in `package.json`. The Prisma adapter package is `@better-auth/prisma-adapter` `^1.6.26`.
+
+### Plugins reused
+
+- Better Auth email OTP server plugin.
+- Better Auth email OTP client plugin.
+- Resend transport and existing OTP email template.
+
+### Limitations
+
+- No customer authentication UI route exists.
+- Rate limiting uses process memory and is not shared across multiple application instances.
+- OTP delivery requires valid Resend configuration.
+- The admin guard checks the current Prisma user record in addition to the session, but no login redirect target exists.
+
+## Authorization Behavior
+
+The following is the expected behavior from the current code and route tree. Items marked **logical/code-level** were not all exercised through a live browser session in the reviewed work.
+
+| User state | `/account` | `/admin` |
+| --- | --- | --- |
+| Logged out | **Not live-tested;** route renders its unavailable-authentication state | **Logical/code-level:** `requireAdmin()` redirects to `/` |
+| Authenticated `CUSTOMER` | **Not live-tested;** route reads session identity when present | **Logical/code-level:** role check redirects to `/` |
+| Authenticated `ADMIN` | **Not live-tested;** route reads session identity when present | **Logical/code-level:** active admin is allowed to render the dashboard |
+
+### Header navigation
+
+The admin shell contains a working `/admin` link. The storefront header links to the now-implemented `/account` route. Live browser navigation was not performed, so account resolution is confirmed by route/build inspection rather than an end-to-end browser assertion.
+
+## Admin Bootstrap Mechanism
+
+### Current status
+
+`scripts/promote-admin.ts` is an operator-only TypeScript script exposed as `npm run bootstrap:admin -- <existing-user-email>`. It queries an existing user by email and updates only `role` and `status`. It fails with a nonzero exit code when no user is found, is idempotent for an already-active admin, and is not exposed through HTTP. No database credentials or personal user data are recorded here.
+
+### Required database result
+
+The first administrator must ultimately have:
+
+```text
+role = ADMIN
+status = ACTIVE
+```
+
+### Environment variable names
+
+The relevant existing environment variable names are:
+
+- `DATABASE_URL`
+- `RESEND_API_KEY`
+- `EMAIL_FROM`
+- `NEXT_PUBLIC_APP_URL`
+
+No values are included in this report.
+
+### Required commands
+
+The command is:
+
+```text
+npm run bootstrap:admin -- <existing-user-email>
+```
+
+The existing project commands also include `npx prisma validate`, `npx prisma generate`, and `npx prisma studio`; none of those automatically promotes a user to admin.
+
+## PostgreSQL SSL Warning Analysis
+
+### Detected warning
+
+During the Next.js build, the PostgreSQL driver emitted a security warning stating that SSL modes `prefer`, `require`, and `verify-ca` are currently treated as aliases for `verify-full`, with different standard libpq semantics planned for a future `pg`/`pg-connection-string` major release.
+
+### Change status
+
+The warning was **not changed**. No SSL adapter configuration or connection string was modified during the access work.
+
+### Assessment
+
+The warning is not a build failure and did not prevent Prisma validation or the production build. It is a compatibility/security configuration warning, not proof of a current connection failure. It is safely addressable later once the deployed Neon connection requirements and certificate policy are confirmed.
+
+### Recommended future action
+
+Review the Neon `DATABASE_URL` and explicitly choose the intended SSL behavior, preferably an explicit secure mode compatible with the deployment environment. If certificate verification requires custom trust material, configure the PostgreSQL adapter/CA handling deliberately. Validate the change against development, CI, and production before changing it.
+
+## Validation Results
+
+### Commands
+
+- `npx prisma validate` - **Passed.** Prisma loaded `prisma/schema.prisma` through `prisma.config.ts` and reported the schema valid.
+- `npm run build` - **Passed.** Next.js 16.3.0 compiled and generated routes including dynamic `/account`, `/admin`, and `/api/auth/[...all]`. The PostgreSQL SSL warning described above was emitted, but the build completed successfully.
+- `npm run lint` - **Passed.** ESLint completed without errors or warnings after the admin sign-out navigation used Next.js router navigation.
+- `npm run bootstrap:admin -- nonexistent-user-20260823@example.invalid` - **Passed failure-path check.** The command exited nonzero with a safe “No user found” message and made no update.
+- Bootstrap success-path check - **Passed.** The existing database user was promoted through the script without printing the email; aggregate verification reported `role = ADMIN`, `status = ACTIVE`, and one active admin user.
+
+### Logical/code-level route validation
+
+- Logged out `/account` - **Logical/code-level:** route exists and renders its unavailable-authentication state.
+- Logged out `/admin` - **Logical/code-level:** server guard redirects to `/`.
+- Customer `/account` - **Not live-tested;** route reads the Better Auth session when present.
+- Customer `/admin` - **Logical/code-level:** role/status guard redirects to `/`.
+- `ADMIN` `/admin` - **Logical/code-level:** active admin passes the guard and reaches the dashboard query/page.
+- Header navigation - **Partially confirmed:** `/admin` and `/account` navigation targets are implemented; no browser click-through was performed.
+- Account navigation no longer causing custom 404 - **Logical/code-level:** `/account` now has a route file and is included in the build route tree.
+
+No live authenticated browser/session test was performed in this reviewed work, so redirect behavior is recorded as logical/code-level validation rather than end-to-end confirmation.
+
+## Known Limitations / Possible Future Issues
+
+### Partial account implementation
+
+- **Possible issue:** `/account` does not yet expose orders or editable account data.
+- **When it may occur:** Any user selects the account icon or mobile “My Account” navigation.
+- **Expected symptom/error:** Users see an unavailable/future state instead of order history or profile editing.
+- **Likely cause:** No customer order query or account mutation flow is implemented.
+- **Recommended debugging step:** Connect authenticated account queries to `Order` and customer profile workflows in a dedicated customer-account task.
+
+### Missing customer login UI
+
+- **Possible issue:** Customers have no browser page to initiate or complete OTP sign-in.
+- **When it may occur:** A user needs to authenticate for account or future protected customer workflows.
+- **Expected symptom/error:** No navigable login page; users cannot complete the API flow through the storefront UI.
+- **Likely cause:** Better Auth APIs exist, but no login route/component was created.
+- **Recommended debugging step:** Build a customer authentication route using the existing `authClient` OTP APIs and verify cookie/session creation end to end.
+
+### OTP delivery configuration
+
+- **Possible issue:** OTP email sending fails in an environment without valid Resend configuration.
+- **When it may occur:** A user requests an OTP outside a correctly configured development/production environment.
+- **Expected symptom/error:** Email delivery failure from the existing Resend transport.
+- **Likely cause:** Missing or invalid `RESEND_API_KEY` or `EMAIL_FROM`.
+- **Recommended debugging step:** Check environment variable presence and Resend sender/domain configuration without logging secrets.
+
+### In-memory rate limiting
+
+- **Possible issue:** OTP rate limits are not shared between application instances.
+- **When it may occur:** Horizontal scaling or multi-process deployment.
+- **Expected symptom/error:** Rate limits may be inconsistent between instances.
+- **Likely cause:** Better Auth is configured with `storage: "memory"`.
+- **Recommended debugging step:** Select a shared rate-limit store before scaling authentication horizontally.
+
+### Admin bootstrap operator dependency
+
+- **Possible issue:** The first admin promotion depends on an operator intentionally running the bootstrap command.
+- **When it may occur:** A fresh database has only customer users or no users.
+- **Expected symptom/error:** `/admin` redirects to `/` for every user.
+- **Likely cause:** The promotion script is intentionally not automatic or publicly exposed.
+- **Recommended debugging step:** Run `npm run bootstrap:admin -- <existing-user-email>` with an existing account, then verify aggregate role/status counts.
+
+### PostgreSQL SSL configuration
+
+- **Possible issue:** Future `pg` or `pg-connection-string` major versions may interpret SSL modes differently.
+- **When it may occur:** Dependency upgrade or deployment using a connection string with an affected SSL mode.
+- **Expected symptom/error:** Changed certificate verification behavior or a connection/certificate error.
+- **Likely cause:** Current alias behavior differs from upcoming standard libpq semantics.
+- **Recommended debugging step:** Review the Neon connection string and explicitly test the chosen SSL mode before upgrading the driver.
+
+### Live authentication validation was unavailable
+
+- **Possible issue:** Cookie/session or redirect behavior could differ from the code-level expectation.
+- **When it may occur:** First browser test with real customer/admin accounts.
+- **Expected symptom/error:** Unexpected redirect, missing session, or failed sign-out.
+- **Likely cause:** No live authenticated browser session was exercised during this reviewed work.
+- **Recommended debugging step:** Test `/admin` with logged-out, customer, and active admin sessions against a configured database; inspect response redirects and Better Auth cookies without exposing values.
+
+## Changes Intentionally Not Made
+
+The following were deliberately excluded to preserve scope and avoid claiming unverified behavior:
+
+- No full customer account backend, order history, or profile editing.
+- No login, registration, or new authentication flow.
+- No Better Auth configuration changes.
+- No Prisma schema changes or migrations.
+- No admin product/category/inventory/order/settings CRUD.
+- No admin API routes or server actions.
+- No payment, metal-rate, invoice, wishlist, or review functionality.
+- No middleware, because the protected admin layout provides the required route boundary.
+- No PostgreSQL SSL configuration change, because the warning requires deployment-specific connection and certificate confirmation.
+- No database credentials, secrets, tokens, or personal email addresses included.
 </file>
 
 <file path="CLAUDE.md">
@@ -17188,21 +18168,78 @@ export default async function ProductPage({
 }
 </file>
 
-<file path="src/app/(storefront)/shop/page.tsx">
-import { ShopClient } from "@/components/storefront/shop/shop-client";
-import { ShopHeader } from "@/components/storefront/shop/shop-header";
+<file path="src/components/storefront/home/categories.tsx">
+import Image from "next/image";
+import Link from "next/link";
 
-import { getProducts } from "@/features/products";
+import { ArrowUpRight } from "lucide-react";
 
-export default async function ShopPage() {
-  const products = await getProducts();
+import { Container } from "@/components/layout/container";
 
+import { SectionHeading } from "./section-heading";
+
+const categories = [
+  {
+    name: "Rings",
+    slug: "rings",
+    image: "/images/categories/rings.jpg",
+  },
+  {
+    name: "Earrings",
+    slug: "earrings",
+    image: "/images/categories/earrings.jpg",
+  },
+  {
+    name: "Pendants",
+    slug: "pendants",
+    image: "/images/categories/necklaces.jpg",
+  },
+  {
+    name: "Bracelets",
+    slug: "bracelets",
+    image: "/images/categories/bracelets.jpg",
+  },
+];
+
+export function Categories() {
   return (
-    <>
-      <ShopHeader productCount={products.length} />
+    <section className="py-20 sm:py-24">
+      <Container>
+        <SectionHeading
+          eyebrow="Explore"
+          title="Find your perfect piece."
+          description="Discover jewellery designed for everyday elegance and unforgettable celebrations."
+        />
 
-      <ShopClient products={products} />
-    </>
+        <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {categories.map((category) => (
+            <Link
+              key={category.name}
+              href={`/shop?category=${category.slug}`}
+              className="group relative aspect-[4/5] overflow-hidden bg-secondary"
+            >
+              <Image
+                src={category.image}
+                alt={category.name}
+                fill
+                className="object-cover transition-transform duration-500 group-hover:scale-105"
+                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+              />
+
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
+
+              <div className="absolute inset-x-0 bottom-0 flex items-center justify-between p-5 text-white">
+                <h3 className="font-display text-3xl">
+                  {category.name}
+                </h3>
+
+                <ArrowUpRight className="size-5 transition-transform duration-300 group-hover:-translate-y-1 group-hover:translate-x-1" />
+              </div>
+            </Link>
+          ))}
+        </div>
+      </Container>
+    </section>
   );
 }
 </file>
@@ -17695,6 +18732,146 @@ export const siteConfig = {
 } as const;
 </file>
 
+<file path="src/features/products/queries/get-products.ts">
+import "server-only";
+
+import type { Prisma } from "@/generated/prisma/client";
+
+import { prisma } from "@/lib/prisma/client";
+
+import {
+  mapProducts,
+  productInclude,
+} from "../utils/product-mappers";
+import type { StorefrontProduct } from "../types/product";
+
+type GetProductsOptions = {
+  categorySlug?: string;
+  collectionId?: string;
+  limit?: number;
+};
+
+export async function getProducts(
+  options: GetProductsOptions = {},
+): Promise<StorefrontProduct[]> {
+  const where: Prisma.ProductWhereInput = {
+    isActive: true,
+    ...(options.categorySlug ? { category: { slug: options.categorySlug } } : {}),
+    ...(options.collectionId ? { collectionId: options.collectionId } : {}),
+  };
+
+  const products = await prisma.product.findMany({
+    where,
+    include: productInclude,
+    orderBy: {
+      createdAt: "desc",
+    },
+    ...(options.limit ? { take: options.limit } : {}),
+  });
+
+  return mapProducts(products);
+}
+</file>
+
+<file path="src/lib/auth/auth.ts">
+import { betterAuth } from "better-auth";
+import { prismaAdapter } from "better-auth/adapters/prisma";
+import { emailOTP } from "better-auth/plugins";
+
+import { prisma } from "@/lib/prisma/client";
+import { sendEmail } from "@/lib/email/send-email";
+import { otpEmailTemplate } from "@/lib/email/templates";
+
+export const auth = betterAuth({
+  database: prismaAdapter(prisma, {
+    provider: "postgresql",
+  }),
+
+  user: {
+    modelName: "User",
+
+    additionalFields: {
+      firstName: {
+        type: "string",
+        required: false,
+        input: true,
+      },
+
+      lastName: {
+        type: "string",
+        required: false,
+        input: true,
+      },
+
+      phone: {
+        type: "string",
+        required: false,
+        input: true,
+      },
+
+      phoneVerified: {
+        type: "boolean",
+        required: false,
+        defaultValue: false,
+        input: false,
+      },
+
+      role: {
+        type: "string",
+        required: false,
+        defaultValue: "CUSTOMER",
+        input: false,
+      },
+
+      status: {
+        type: "string",
+        required: false,
+        defaultValue: "ACTIVE",
+        input: false,
+      },
+    },
+  },
+
+  rateLimit: {
+    enabled: true,
+    storage: "memory",
+
+    customRules: {
+      "/email-otp/send-verification-otp": {
+        window: 60,
+        max: 3,
+      },
+    },
+  },
+
+  emailAndPassword: {
+    enabled: true,
+  },
+  
+  plugins: [
+    emailOTP({
+      otpLength: 6,
+      expiresIn: 300,
+      allowedAttempts: 3,
+
+      async sendVerificationOTP({ email, otp, type }) {
+        const template = otpEmailTemplate({
+          otp,
+          type,
+        });
+
+        await sendEmail({
+          to: email,
+          subject: template.subject,
+          html: template.html,
+          text: template.text,
+        });
+      },
+    }),
+  ],
+});
+</file>
+
 <file path="src/lib/prisma/client.ts">
 import "server-only";
 
@@ -17766,12 +18943,188 @@ next-env.d.ts
 /src/generated/prisma
 </file>
 
+<file path="src/app/(storefront)/shop/page.tsx">
+import { ShopClient } from "@/components/storefront/shop/shop-client";
+import { ShopHeader } from "@/components/storefront/shop/shop-header";
+
+import { getProducts } from "@/features/products";
+
+type ShopPageProps = {
+  searchParams: Promise<{
+    category?: string;
+  }>;
+};
+
+export default async function ShopPage({
+  searchParams,
+}: ShopPageProps) {
+  const { category } = await searchParams;
+  const products = await getProducts({
+    categorySlug: category,
+  });
+
+  return (
+    <>
+      <ShopHeader productCount={products.length} />
+
+      <ShopClient products={products} />
+    </>
+  );
+}
+</file>
+
+<file path="src/app/globals.css">
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+
+:root {
+  --background: #f8f6f1;
+  --foreground: #1c1c1a;
+
+  --card: #ffffff;
+  --card-foreground: #1c1c1a;
+
+  --popover: #ffffff;
+  --popover-foreground: #1c1c1a;
+
+  --primary: #1c1c1a;
+  --primary-foreground: #f8f6f1;
+
+  --secondary: #eeeae2;
+  --secondary-foreground: #1c1c1a;
+
+  --muted: #eeeae2;
+  --muted-foreground: #6b6862;
+
+  --accent: #b08d57;
+  --accent-foreground: #ffffff;
+
+  --border: #ded8cc;
+  --input: #ded8cc;
+  --ring: #b08d57;
+
+  --destructive: #b42318;
+  --destructive-foreground: #ffffff;
+
+  --radius: 0.5rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --font-sans: var(--font-manrope);
+  --font-serif: var(--font-cormorant);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 4px);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-manrope), sans-serif;
+}
+
+::selection {
+  background: var(--accent);
+  color: white;
+}
+
+.font-display {
+  font-family: var(--font-cormorant), serif;
+}
+
+.font-body {
+  font-family: var(--font-manrope), sans-serif;
+}
+</file>
+
+<file path="src/app/layout.tsx">
+import type { Metadata } from "next";
+import {
+  Cormorant_Garamond,
+  Manrope,
+} from "next/font/google";
+
+import "./globals.css";
+
+const manrope = Manrope({
+  variable: "--font-manrope",
+  subsets: ["latin"],
+});
+
+const cormorant = Cormorant_Garamond({
+  variable: "--font-cormorant",
+  subsets: ["latin"],
+});
+
+export const metadata: Metadata = {
+  title: {
+    default: "Parth Jewellers",
+    template: "%s | Parth Jewellers",
+  },
+  description:
+    "Discover timeless jewellery crafted for every celebration.",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en">
+      <body className={`${manrope.variable} ${cormorant.variable}`}>
+        {children}
+      </body>
+    </html>
+  );
+}
+</file>
+
 <file path="ARCHITECTURE.md">
 # NPJ Jewellery E-Commerce Platform Architecture
 
 **Status:** Living architecture source of truth  
-**Last reviewed:** 2026-08-22  
-**Current position:** Sprint 6, before Sprint 6.1
+**Last reviewed:** 2026-08-23
+**Current position:** Sprint 7 foundation plus account route foundation
 
 This document describes the architecture that exists in the repository today. Future work is explicitly labeled `PLANNED` and must not be read as implemented behavior.
 
@@ -17852,6 +19205,8 @@ src/
   services/                     Service-layer boundaries; product/order services are currently empty
   styles/                       Shared styles area
   types/                        Shared domain types
+scripts/
+  promote-admin.ts              Operator-only first-admin promotion script
 public/images/                  Storefront category and product image assets
 ```
 
@@ -17862,10 +19217,11 @@ Generated Prisma files should be regenerated from `prisma/schema.prisma`; they a
 The `(storefront)` folder is a route group, so it does not appear in public URLs. The current implemented public routes are:
 
 - `/` - homepage
-- `/shop` - mock product listing and client-side search
+- `/shop` - Prisma-backed product listing, optional category query filtering, and client-side search
 - `/product/[slug]` - mock product detail and related products
 - `/cart` - cart page
 - `/checkout` - checkout UI
+- `/account` - session-aware customer account foundation
 - `/collections` - collections page
 - `/arrivals` - new arrivals page
 - `/about` - about page
@@ -17902,7 +19258,7 @@ The authentication configuration enables in-memory rate limiting. Email OTPs are
 
 Server authorization helpers provide active-user and role checks. The admin layout uses `src/lib/auth/require-admin.ts`, which reads the Better Auth session, verifies the corresponding Prisma user is `ACTIVE` and has the `ADMIN` role, and redirects unauthorized requests to `/`.
 
-There is currently no login route in the repository. Therefore unauthenticated admin requests use the existing storefront home redirect until a login route is added in a separate authentication task.
+There is currently no login route in the repository. The account page therefore renders a truthful unavailable-authentication state when no session is present, while authenticated sessions can view session-provided profile identity and sign out.
 
 ### Planned
 
@@ -18012,7 +19368,7 @@ Storefront UI is organized by concern:
 - `components/storefront/cart`: cart items, sheet, trigger.
 - `components/storefront/checkout`: checkout form and order summary.
 
-The homepage featured section, shop, product detail, collections, and new arrivals now use dynamic Prisma-backed queries while preserving the existing UI. The mock data file remains in place for transition safety and should only be removed after all references are intentionally retired.
+The homepage featured section, shop, product detail, collections, and new arrivals now use dynamic Prisma-backed queries while preserving the existing UI. Homepage category cards use the catalogue slugs for their `/shop?category=<slug>` links, and the shop query applies that category filter server-side before the existing client-side search. The mock data file remains in place for transition safety and should only be removed after all references are intentionally retired.
 
 ## Admin Architecture
 
@@ -18021,6 +19377,10 @@ The homepage featured section, shop, product detail, collections, and new arriva
 The `/admin` route group now contains a protected layout and dashboard page. `src/components/admin/admin-shell.tsx` composes the desktop sidebar, header, and content area. `admin-sidebar.tsx` provides desktop navigation and a mobile Sheet drawer. `admin-header.tsx` displays the authenticated admin identity and uses the existing Better Auth client for sign-out.
 
 The current dashboard scope is intentionally limited to real database metrics: total products, total orders, low-stock inventory rows, total customers, and the five most recent orders. No CRUD workflows or future admin routes are implemented.
+
+The first administrator can be established by an operator with `npm run bootstrap:admin -- <existing-user-email>`. The server-side script looks up the existing user by email and updates only `role` to `ADMIN` and `status` to `ACTIVE`; it is not exposed as an HTTP route.
+
+The customer account route is a session-aware UI foundation at `/account`. It displays only identity supplied by the Better Auth session, provides sign-out for authenticated users, and shows a truthful unavailable-authentication state when no session is present. Customer order history and profile editing are not implemented.
 
 ### Planned MVP
 
@@ -18207,202 +19567,6 @@ Invoice data must be based on immutable order snapshots so later product price, 
 - Historical order and invoice values must be snapshots, not live joins to mutable product data.
 - Authentication, admin authorization, pricing, inventory checks, and payment state transitions are server responsibilities.
 - Any future change to routes, schema, auth, state, integrations, or sprint status must update this living document in the same task.
-</file>
-
-<file path="src/app/globals.css">
-@import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
-
-
-:root {
-  --background: #f8f6f1;
-  --foreground: #1c1c1a;
-
-  --card: #ffffff;
-  --card-foreground: #1c1c1a;
-
-  --popover: #ffffff;
-  --popover-foreground: #1c1c1a;
-
-  --primary: #1c1c1a;
-  --primary-foreground: #f8f6f1;
-
-  --secondary: #eeeae2;
-  --secondary-foreground: #1c1c1a;
-
-  --muted: #eeeae2;
-  --muted-foreground: #6b6862;
-
-  --accent: #b08d57;
-  --accent-foreground: #ffffff;
-
-  --border: #ded8cc;
-  --input: #ded8cc;
-  --ring: #b08d57;
-
-  --destructive: #b42318;
-  --destructive-foreground: #ffffff;
-
-  --radius: 0.5rem;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-
-  --font-sans: var(--font-manrope);
-  --font-serif: var(--font-cormorant);
-
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: var(--radius);
-  --radius-lg: calc(var(--radius) + 4px);
-}
-
-* {
-  border-color: var(--border);
-}
-
-html {
-  scroll-behavior: smooth;
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-manrope), sans-serif;
-}
-
-::selection {
-  background: var(--accent);
-  color: white;
-}
-
-.font-display {
-  font-family: var(--font-cormorant), serif;
-}
-
-.font-body {
-  font-family: var(--font-manrope), sans-serif;
-}
-</file>
-
-<file path="src/app/layout.tsx">
-import type { Metadata } from "next";
-import {
-  Cormorant_Garamond,
-  Manrope,
-} from "next/font/google";
-
-import "./globals.css";
-
-const manrope = Manrope({
-  variable: "--font-manrope",
-  subsets: ["latin"],
-});
-
-const cormorant = Cormorant_Garamond({
-  variable: "--font-cormorant",
-  subsets: ["latin"],
-});
-
-export const metadata: Metadata = {
-  title: {
-    default: "Parth Jewellers",
-    template: "%s | Parth Jewellers",
-  },
-  description:
-    "Discover timeless jewellery crafted for every celebration.",
-};
-
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
-  return (
-    <html lang="en">
-      <body className={`${manrope.variable} ${cormorant.variable}`}>
-        {children}
-      </body>
-    </html>
-  );
-}
-</file>
-
-<file path="package.json">
-{
-  "name": "npj",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "@better-auth/prisma-adapter": "^1.6.26",
-    "@hookform/resolvers": "^5.7.1",
-    "@prisma/adapter-pg": "^7.9.1",
-    "@prisma/client": "^7.9.1",
-    "bcryptjs": "^3.0.3",
-    "better-auth": "^1.6.26",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "date-fns": "^4.4.0",
-    "lucide-react": "^1.28.0",
-    "next": "16.3.0",
-    "pg": "^8.23.0",
-    "prisma": "^7.9.1",
-    "radix-ui": "^1.6.7",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "react-hook-form": "^7.84.0",
-    "resend": "^6.19.0",
-    "shadcn": "^4.16.1",
-    "sonner": "^2.0.7",
-    "tailwind-merge": "^3.6.0",
-    "tw-animate-css": "^1.4.0",
-    "zod": "^4.4.3",
-    "zustand": "^5.0.15"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.0",
-    "tailwindcss": "^4",
-    "typescript": "^5"
-  }
-}
 </file>
 
 <file path="prisma/schema.prisma">
@@ -19196,6 +20360,58 @@ model StoreSettings {
   updatedAt DateTime @updatedAt
 
   @@map("store_settings")
+}
+</file>
+
+<file path="package.json">
+{
+  "name": "npj",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "bootstrap:admin": "tsx scripts/promote-admin.ts"
+  },
+  "dependencies": {
+    "@better-auth/prisma-adapter": "^1.6.26",
+    "@hookform/resolvers": "^5.7.1",
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
+    "bcryptjs": "^3.0.3",
+    "better-auth": "^1.6.26",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.4.0",
+    "lucide-react": "^1.28.0",
+    "next": "16.3.0",
+    "pg": "^8.23.0",
+    "prisma": "^7.9.1",
+    "radix-ui": "^1.6.7",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-hook-form": "^7.84.0",
+    "resend": "^6.19.0",
+    "shadcn": "^4.16.1",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.6.0",
+    "tw-animate-css": "^1.4.0",
+    "zod": "^4.4.3",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.12",
+    "typescript": "^5"
+  }
 }
 </file>
 

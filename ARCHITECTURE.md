@@ -64,7 +64,7 @@ src/
     api/auth/[...all]/           Better Auth catch-all API handler
   actions/                      Server action area; currently sparse
   components/
-    layout/                     Header, footer, announcement, navigation, container
+    layout/                     Header, global search, footer, announcement, navigation, container
     admin/                      Protected dashboard shell, sidebar, and header
     storefront/                 Home, shop, product, cart, and checkout UI
     ui/                         Reusable UI primitives
@@ -95,7 +95,7 @@ Generated Prisma files should be regenerated from `prisma/schema.prisma`; they a
 The `(storefront)` folder is a route group, so it does not appear in public URLs. The current implemented public routes are:
 
 - `/` - homepage
-- `/shop` - Prisma-backed product listing, optional category query filtering, and client-side search
+- `/shop` - Prisma-backed product listing, optional category filtering, and URL-driven client-side search
 - `/product/[slug]` - mock product detail and related products
 - `/cart` - cart page
 - `/checkout` - checkout UI
@@ -246,7 +246,7 @@ Storefront UI is organized by concern:
 - `components/storefront/cart`: cart items, sheet, trigger.
 - `components/storefront/checkout`: checkout form and order summary.
 
-The homepage featured section, shop, product detail, collections, and new arrivals now use dynamic Prisma-backed queries while preserving the existing UI. Homepage category cards use the catalogue slugs for their `/shop?category=<slug>` links, and the shop query applies that category filter server-side before the existing client-side search. The mock data file remains in place for transition safety and should only be removed after all references are intentionally retired.
+The homepage featured section, shop, product detail, collections, and new arrivals now use dynamic Prisma-backed queries while preserving the existing UI. The shared header provides an expandable client search that navigates to `/shop?q=<query>`. Homepage category cards use catalogue slugs for their `/shop?category=<slug>` links, and the shop query applies category filtering server-side before the existing client-side URL search. The mock data file remains in place for transition safety and should only be removed after all references are intentionally retired.
 
 ## Admin Architecture
 

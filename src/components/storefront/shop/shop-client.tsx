@@ -1,11 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { EmptyProducts } from "./empty-products";
 import { ProductGrid } from "./product-grid";
-import { ShopToolbar } from "./shop-toolbar";
-
 import type { StorefrontProduct } from "@/features/products/types/product";
 
 type ShopClientProps = {
@@ -15,10 +14,11 @@ type ShopClientProps = {
 export function ShopClient({
   products,
 }: ShopClientProps) {
-  const [searchQuery, setSearchQuery] = useState("");
+  const searchParams = useSearchParams();
+  const currentQuery = searchParams.get("q") || "";
 
   const filteredProducts = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
+    const query = currentQuery.trim().toLowerCase();
 
     if (!query) {
       return products;
@@ -35,15 +35,10 @@ export function ShopClient({
         .toLowerCase()
         .includes(query),
     );
-  }, [products, searchQuery]);
+  }, [products, currentQuery]);
 
   return (
     <>
-      <ShopToolbar
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-      />
-
       {filteredProducts.length > 0 ? (
         <ProductGrid products={filteredProducts} />
       ) : (
