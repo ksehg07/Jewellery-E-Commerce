@@ -22,5 +22,5 @@ export async function getNewArrivals(
     take: limit,
   });
 
-  return mapProducts(products);
+  return await mapProducts(products);
 }

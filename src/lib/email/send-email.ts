@@ -7,6 +7,11 @@ type SendEmailOptions = {
   subject: string;
   html: string;
   text?: string;
+  attachments?: Array<{
+    filename: string;
+    content: string | Buffer;
+    contentType?: string;
+  }>;
 };
 
 export async function sendEmail({
@@ -14,6 +19,7 @@ export async function sendEmail({
   subject,
   html,
   text,
+  attachments,
 }: SendEmailOptions) {
   const { data, error } = await resend.emails.send({
     from: process.env.EMAIL_FROM!,
@@ -21,6 +27,7 @@ export async function sendEmail({
     subject,
     html,
     text,
+    attachments,
   });
 
   if (error) {

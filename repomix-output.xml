@@ -149,6 +149,7 @@ prisma/
     catalogue-metadata.ts
     catalogue.ts
   schema.prisma
+  seed.ts
 public/
   images/
     categories/
@@ -170,6 +171,7 @@ public/
   window.svg
 scripts/
   promote-admin.ts
+  test-api-routes.ts
 src/
   app/
     (admin)/
@@ -203,6 +205,8 @@ src/
       product/
         [slug]/
           page.tsx
+      razorpay-test/
+        page.tsx
       returns/
         page.tsx
       shipping/
@@ -217,6 +221,15 @@ src/
       auth/
         [...all]/
           route.ts
+      create-order/
+        route.ts
+      razorpay/
+        create-order/
+          route.ts
+        verify-payment/
+          route.ts
+      verify-payment/
+        route.ts
     favicon.ico
     globals.css
     layout.tsx
@@ -236,6 +249,7 @@ src/
       announcement-bar.tsx
       container.tsx
       footer.tsx
+      header-search.tsx
       header.tsx
       mobile-navigation.tsx
     storefront/
@@ -246,6 +260,7 @@ src/
       checkout/
         checkout-form.tsx
         order-summary.tsx
+        razorpay-button.tsx
       home/
         categories.tsx
         featured-products.tsx
@@ -321,6 +336,8 @@ src/
       checkout.ts
       product.ts
       user.ts
+    razorpay-client.ts
+    razorpay.ts
     utils.ts
   services/
     auth.service.ts
@@ -350,6 +367,921 @@ tsconfig.json
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="scripts/test-api-routes.ts">
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
+
+// Load .env
+const envPath = path.resolve(process.cwd(), ".env");
+if (fs.existsSync(envPath)) {
+  const content = fs.readFileSync(envPath, "utf-8");
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx > 0) {
+      const key = trimmed.slice(0, eqIdx).trim();
+      let val = trimmed.slice(eqIdx + 1).trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      process.env[key] = val;
+    }
+  }
+}
+
+import { POST as createOrderHandler } from "../src/app/api/create-order/route";
+import { POST as verifyPaymentHandler } from "../src/app/api/verify-payment/route";
+import { NextRequest } from "next/server";
+
+function createMockRequest(body: any, url: string = "http://localhost:3000"): NextRequest {
+  return new NextRequest(new URL(url), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+async function runRouteTests() {
+  console.log("=== TESTING API ROUTE HANDLERS ===");
+
+  // 1. Create order: Invalid amount (< 100 paise)
+  console.log("\n[Test 1] POST /api/create-order with amount < 100 paise");
+  const reqSmallAmount = createMockRequest({ amount: 50 });
+  const resSmallAmount = await createOrderHandler(reqSmallAmount);
+  const dataSmallAmount = await resSmallAmount.json();
+  console.log("Status:", resSmallAmount.status, "Body:", dataSmallAmount);
+  if (resSmallAmount.status !== 400) throw new Error("Expected status 400 for amount < 100");
+  console.log("✓ Test 1 Passed: Rejected amount < 100 with status 400");
+
+  // 2. Create order: Missing amount
+  console.log("\n[Test 2] POST /api/create-order with missing amount");
+  const reqNoAmount = createMockRequest({ currency: "INR" });
+  const resNoAmount = await createOrderHandler(reqNoAmount);
+  const dataNoAmount = await resNoAmount.json();
+  console.log("Status:", resNoAmount.status, "Body:", dataNoAmount);
+  if (resNoAmount.status !== 400) throw new Error("Expected status 400 for missing amount");
+  console.log("✓ Test 2 Passed: Rejected missing amount with status 400");
+
+  // 3. Create order: Valid amount (1000 paise = 10.00 INR)
+  console.log("\n[Test 3] POST /api/create-order with valid amount (1000 paise)");
+  const reqValid = createMockRequest({ amount: 1000, currency: "INR", receipt: "rcpt_test_api" });
+  const resValid = await createOrderHandler(reqValid);
+  const dataValid = await resValid.json();
+  console.log("Status:", resValid.status, "Body:", dataValid);
+  if (resValid.status !== 200 || !dataValid.order_id || dataValid.amount !== 1000 || dataValid.currency !== "INR") {
+    throw new Error("Expected status 200 with order_id, amount, and currency");
+  }
+  console.log("✓ Test 3 Passed: Successfully created order with order_id:", dataValid.order_id);
+
+  const testOrderId = dataValid.order_id;
+  const testPaymentId = "pay_mock_" + Date.now();
+
+  // 4. Verify payment: Missing fields
+  console.log("\n[Test 4] POST /api/verify-payment with missing fields");
+  const reqMissingFields = createMockRequest({ razorpay_order_id: testOrderId });
+  const resMissingFields = await verifyPaymentHandler(reqMissingFields);
+  const dataMissingFields = await resMissingFields.json();
+  console.log("Status:", resMissingFields.status, "Body:", dataMissingFields);
+  if (resMissingFields.status !== 400 || dataMissingFields.success !== false) {
+    throw new Error("Expected status 400 for missing fields");
+  }
+  console.log("✓ Test 4 Passed: Rejected missing fields with status 400");
+
+  // 5. Verify payment: Signature mismatch
+  console.log("\n[Test 5] POST /api/verify-payment with invalid/tampered signature");
+  const reqTampered = createMockRequest({
+    razorpay_order_id: testOrderId,
+    razorpay_payment_id: testPaymentId,
+    razorpay_signature: "bad_signature_1234567890abcdef1234567890abcdef1234567890abcdef12345678",
+  });
+  const resTampered = await verifyPaymentHandler(reqTampered);
+  const dataTampered = await resTampered.json();
+  console.log("Status:", resTampered.status, "Body:", dataTampered);
+  if (resTampered.status !== 400 || dataTampered.success !== false) {
+    throw new Error("Expected status 400 for signature mismatch");
+  }
+  console.log("✓ Test 5 Passed: Rejected signature mismatch with status 400");
+
+  // 6. Verify payment: Valid HMAC-SHA256 signature
+  console.log("\n[Test 6] POST /api/verify-payment with valid HMAC-SHA256 signature");
+  const validSignature = crypto
+    .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
+    .update(`${testOrderId}|${testPaymentId}`)
+    .digest("hex");
+
+  const reqSuccess = createMockRequest({
+    razorpay_order_id: testOrderId,
+    razorpay_payment_id: testPaymentId,
+    razorpay_signature: validSignature,
+  });
+  const resSuccess = await verifyPaymentHandler(reqSuccess);
+  const dataSuccess = await resSuccess.json();
+  console.log("Status:", resSuccess.status, "Body:", dataSuccess);
+  if (resSuccess.status !== 200 || dataSuccess.success !== true) {
+    throw new Error("Expected status 200 with success: true");
+  }
+  console.log("✓ Test 6 Passed: Successfully verified valid HMAC-SHA256 payment signature!");
+
+  console.log("\n=========================================");
+  console.log("ALL API ROUTE HANDLER TESTS PASSED! 100%");
+  console.log("=========================================");
+}
+
+runRouteTests().catch((err) => {
+  console.error("Test failed:", err);
+  process.exit(1);
+});
+</file>
+
+<file path="src/app/(storefront)/razorpay-test/page.tsx">
+"use client";
+
+import { useState } from "react";
+import { Container } from "@/components/layout/container";
+import { RazorpayButton } from "@/components/storefront/checkout/razorpay-button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CheckCircle2, ShieldCheck, AlertCircle } from "lucide-react";
+
+export default function RazorpayTestPage() {
+  const [amountRupees, setAmountRupees] = useState("100");
+  const [customerName, setCustomerName] = useState("Kunal Sehgal");
+  const [customerEmail, setCustomerEmail] = useState("kunal@example.com");
+  const [customerPhone, setCustomerPhone] = useState("9876543210");
+  const [verificationResult, setVerificationResult] = useState<{
+    success: boolean;
+    order_id: string;
+    payment_id: string;
+  } | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
+
+  const amountNumber = parseFloat(amountRupees) || 0;
+  const amountInPaise = Math.round(amountNumber * 100);
+
+  return (
+    <Container className="py-12 sm:py-20 max-w-2xl">
+      <div className="text-center mb-8">
+        <p className="text-xs font-medium tracking-[0.2em] text-accent uppercase">
+          Integration Verification
+        </p>
+        <h1 className="mt-2 font-display text-4xl">Razorpay Standard Checkout Test</h1>
+        <p className="mt-3 text-sm text-muted-foreground">
+          Use this interactive test console to verify the 3-step Razorpay integration:
+          Order Creation &rarr; Standard Checkout Modal &rarr; Server-Side Signature Verification.
+        </p>
+      </div>
+
+      <Card className="border border-border">
+        <CardHeader>
+          <CardTitle className="text-xl">Test Payment Details</CardTitle>
+          <CardDescription>
+            Enter test parameters to launch Razorpay checkout modal
+          </CardDescription>
+        </CardHeader>
+
+        <CardContent className="space-y-6">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1.5">
+                Amount (INR ₹)
+              </label>
+              <Input
+                type="number"
+                min="1"
+                step="1"
+                value={amountRupees}
+                onChange={(e) => {
+                  setAmountRupees(e.target.value);
+                  setVerificationResult(null);
+                  setLastError(null);
+                }}
+                placeholder="100"
+              />
+              <span className="text-[11px] text-muted-foreground mt-1 block">
+                = {amountInPaise} paise (min: 100 paise)
+              </span>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1.5">
+                Customer Name
+              </label>
+              <Input
+                type="text"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                placeholder="Full Name"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1.5">
+                Customer Email
+              </label>
+              <Input
+                type="email"
+                value={customerEmail}
+                onChange={(e) => setCustomerEmail(e.target.value)}
+                placeholder="Email"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1.5">
+                Customer Phone
+              </label>
+              <Input
+                type="tel"
+                value={customerPhone}
+                onChange={(e) => setCustomerPhone(e.target.value)}
+                placeholder="Phone"
+              />
+            </div>
+          </div>
+
+          {lastError && (
+            <div className="flex items-start gap-2.5 rounded-md border border-destructive/20 bg-destructive/10 p-3.5 text-sm text-destructive">
+              <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium">Payment Error</p>
+                <p className="text-xs mt-0.5">{lastError}</p>
+              </div>
+            </div>
+          )}
+
+          {verificationResult && (
+            <div className="flex items-start gap-2.5 rounded-md border border-emerald-500/20 bg-emerald-500/10 p-4 text-emerald-700 dark:text-emerald-300">
+              <CheckCircle2 className="h-5 w-5 shrink-0 mt-0.5 text-emerald-500" />
+              <div className="space-y-1 text-xs">
+                <p className="font-semibold text-sm">Payment Verified Successfully!</p>
+                <p>
+                  <strong>Order ID:</strong> {verificationResult.order_id}
+                </p>
+                <p>
+                  <strong>Payment ID:</strong> {verificationResult.payment_id}
+                </p>
+                <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                  HMAC-SHA256 signature was verified on the backend.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="pt-2">
+            <RazorpayButton
+              amountInPaise={amountInPaise}
+              currency="INR"
+              name="Parth Jewellers Test"
+              description={`Test payment of ₹${amountRupees}`}
+              prefill={{
+                name: customerName,
+                email: customerEmail,
+                contact: customerPhone,
+              }}
+              onSuccess={(result) => {
+                setVerificationResult(result);
+                setLastError(null);
+              }}
+              onError={(err) => {
+                const msg = typeof err === "string" ? err : err.message;
+                setLastError(msg);
+              }}
+              onDismiss={() => {
+                setLastError("Payment modal was closed by user.");
+              }}
+              className="w-full text-base py-6 font-medium"
+            >
+              Pay ₹{amountRupees || "0"} with Razorpay
+            </RazorpayButton>
+
+            <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground mt-3">
+              <ShieldCheck className="h-4 w-4 text-emerald-600" />
+              Uses Test Key: {process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "Configured"}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    </Container>
+  );
+}
+</file>
+
+<file path="src/app/api/create-order/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { getRazorpayClient } from "@/lib/razorpay";
+
+export async function POST(request: NextRequest) {
+  try {
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid JSON request body" },
+        { status: 400 }
+      );
+    }
+
+    const { amount, currency = "INR", receipt, notes } = body || {};
+
+    // Validate amount (in paise, minimum 100 paise = 1 INR)
+    if (typeof amount !== "number" || isNaN(amount) || amount < 100) {
+      return NextResponse.json(
+        {
+          error:
+            "Invalid amount. Amount must be a number and at least 100 paise (₹1).",
+        },
+        { status: 400 }
+      );
+    }
+
+    let razorpay;
+    try {
+      razorpay = getRazorpayClient();
+    } catch (configError: any) {
+      return NextResponse.json(
+        { error: configError.message || "Razorpay configuration error" },
+        { status: 500 }
+      );
+    }
+
+    // Call Razorpay API: POST https://api.razorpay.com/v1/orders
+    const orderOptions = {
+      amount: Math.round(amount),
+      currency: typeof currency === "string" ? currency.toUpperCase() : "INR",
+      receipt:
+        receipt ||
+        `rcpt_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`,
+      notes: typeof notes === "object" && notes !== null ? notes : {},
+    };
+
+    const order = await razorpay.orders.create(orderOptions);
+
+    return NextResponse.json(
+      {
+        order_id: order.id,
+        amount: order.amount,
+        currency: order.currency,
+      },
+      { status: 200 }
+    );
+  } catch (error: any) {
+    console.error("Razorpay create-order error:", error);
+
+    // Handle authentication failures (Razorpay returns 401 on bad credentials)
+    if (
+      error?.statusCode === 401 ||
+      error?.status === 401 ||
+      error?.error?.code === "BAD_REQUEST_ERROR" &&
+        typeof error?.error?.description === "string" &&
+        error.error.description.toLowerCase().includes("auth")
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            error?.error?.description ||
+            "Razorpay authentication failed. Please verify API credentials.",
+        },
+        { status: 401 }
+      );
+    }
+
+    // Handle other Razorpay API errors (return 500)
+    const errorMessage =
+      error?.error?.description ||
+      error?.message ||
+      "Failed to create Razorpay order";
+
+    return NextResponse.json(
+      {
+        error: errorMessage,
+      },
+      { status: 500 }
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/razorpay/create-order/route.ts">
+export { POST } from "../../create-order/route";
+</file>
+
+<file path="src/app/api/razorpay/verify-payment/route.ts">
+export { POST } from "../../verify-payment/route";
+</file>
+
+<file path="src/app/api/verify-payment/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { verifyPaymentSignature } from "@/lib/razorpay";
+
+export async function POST(request: NextRequest) {
+  try {
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, error: "Invalid JSON request body" },
+        { status: 400 }
+      );
+    }
+
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      order_id,
+      payment_id,
+      signature,
+      orderId: internalOrderId,
+    } = body || {};
+
+    const resolvedOrderId = (razorpay_order_id || order_id || "").trim();
+    const resolvedPaymentId = (razorpay_payment_id || payment_id || "").trim();
+    const resolvedSignature = (razorpay_signature || signature || "").trim();
+
+    // Check for missing fields
+    if (!resolvedOrderId || !resolvedPaymentId || !resolvedSignature) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Missing required fields. Both order_id, payment_id, and signature are required.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Verify HMAC-SHA256 signature
+    let isValid = false;
+    try {
+      isValid = verifyPaymentSignature({
+        orderId: resolvedOrderId,
+        paymentId: resolvedPaymentId,
+        signature: resolvedSignature,
+      });
+    } catch (err: any) {
+      console.error("Signature verification error:", err);
+      return NextResponse.json(
+        { success: false, error: err.message || "Verification failed" },
+        { status: 500 }
+      );
+    }
+
+    // Handle signature mismatch: return 400, do NOT mark as paid
+    if (!isValid) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Payment verification failed: Signature mismatch",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Signatures match - payment verified!
+    // If an existing order in database is associated, update payment record
+    if (internalOrderId) {
+      try {
+        const { prisma } = await import("@/lib/prisma/client");
+        await prisma.payment.upsert({
+          where: { gatewayOrderId: resolvedOrderId },
+          update: {
+            gatewayPaymentId: resolvedPaymentId,
+            gatewaySignature: resolvedSignature,
+            status: "SUCCESS",
+            paidAt: new Date(),
+          },
+          create: {
+            orderId: internalOrderId,
+            gateway: "RAZORPAY",
+            gatewayOrderId: resolvedOrderId,
+            gatewayPaymentId: resolvedPaymentId,
+            gatewaySignature: resolvedSignature,
+            amount: 0,
+            status: "SUCCESS",
+            paidAt: new Date(),
+          },
+        });
+      } catch (dbError) {
+        console.warn("Could not update database payment record:", dbError);
+      }
+    }
+
+    return NextResponse.json(
+      {
+        success: true,
+        message: "Payment verified successfully",
+        order_id: resolvedOrderId,
+        payment_id: resolvedPaymentId,
+      },
+      { status: 200 }
+    );
+  } catch (error: any) {
+    console.error("Razorpay verify-payment error:", error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: error.message || "Internal server error during verification",
+      },
+      { status: 500 }
+    );
+  }
+}
+</file>
+
+<file path="src/components/storefront/checkout/razorpay-button.tsx">
+"use client";
+
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  initiateRazorpayCheckout,
+  RazorpayPrefill,
+} from "@/lib/razorpay-client";
+import { toast } from "sonner";
+
+interface RazorpayButtonProps {
+  amountInPaise: number;
+  currency?: string;
+  receipt?: string;
+  name?: string;
+  description?: string;
+  prefill?: RazorpayPrefill;
+  notes?: Record<string, string>;
+  onSuccess?: (verifyResult: {
+    success: boolean;
+    order_id: string;
+    payment_id: string;
+  }) => void;
+  onError?: (error: Error | string) => void;
+  onDismiss?: () => void;
+  className?: string;
+  children?: React.ReactNode;
+  disabled?: boolean;
+}
+
+export function RazorpayButton({
+  amountInPaise,
+  currency = "INR",
+  receipt,
+  name = "Parth Jewellers",
+  description = "Order Payment",
+  prefill,
+  notes,
+  onSuccess,
+  onError,
+  onDismiss,
+  className,
+  children,
+  disabled = false,
+}: RazorpayButtonProps) {
+  const [isLoading, setIsLoading] = useState(false);
+
+  async function handlePayment() {
+    if (isLoading || disabled) return;
+
+    if (amountInPaise < 100) {
+      toast.error("Amount must be at least ₹1 (100 paise).");
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      await initiateRazorpayCheckout({
+        amountInPaise,
+        currency,
+        receipt,
+        name,
+        description,
+        prefill,
+        notes,
+        onSuccess: (result) => {
+          toast.success("Payment successful and verified!");
+          onSuccess?.(result);
+        },
+        onError: (err) => {
+          const message = typeof err === "string" ? err : err.message;
+          toast.error(message || "Payment failed");
+          onError?.(err);
+        },
+        onDismiss: () => {
+          toast.info("Payment cancelled");
+          onDismiss?.();
+        },
+      });
+    } catch (err: any) {
+      console.error("Checkout initiation error:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  return (
+    <>
+      <Button
+        type="button"
+        size="lg"
+        onClick={handlePayment}
+        disabled={isLoading || disabled}
+        className={className}
+      >
+        {isLoading ? "Processing Payment..." : children || "Pay with Razorpay"}
+      </Button>
+    </>
+  );
+}
+</file>
+
+<file path="src/lib/razorpay-client.ts">
+export interface RazorpayPrefill {
+  name?: string;
+  email?: string;
+  contact?: string;
+}
+
+export interface RazorpaySuccessResponse {
+  razorpay_payment_id: string;
+  razorpay_order_id: string;
+  razorpay_signature: string;
+}
+
+export interface RazorpayPaymentFailureResponse {
+  error: {
+    code: string;
+    description: string;
+    source: string;
+    step: string;
+    reason: string;
+    metadata: {
+      order_id: string;
+      payment_id?: string;
+    };
+  };
+}
+
+
+export interface InitiateCheckoutOptions {
+  amountInPaise: number;
+  currency?: string;
+  receipt?: string;
+  name?: string;
+  description?: string;
+  prefill?: RazorpayPrefill;
+  notes?: Record<string, string>;
+  onSuccess?: (verifyResult: {
+    success: boolean;
+    order_id: string;
+    payment_id: string;
+  }) => void;
+  onError?: (error: Error | string) => void;
+  onDismiss?: () => void;
+}
+
+/**
+ * Dynamically loads the Razorpay Standard Checkout script if not already present.
+ */
+export function loadRazorpayScript(): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined") {
+      resolve(false);
+      return;
+    }
+
+    if ((window as any).Razorpay) {
+      resolve(true);
+      return;
+    }
+
+    const existingScript = document.querySelector(
+      'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
+    );
+    if (existingScript) {
+      if ((window as any).Razorpay) {
+        resolve(true);
+        return;
+      }
+
+      existingScript.addEventListener("load", () => resolve(true));
+      existingScript.addEventListener("error", () => resolve(false));
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+}
+
+/**
+ * Initiates Razorpay Standard Web Checkout:
+ * 1. Calls POST /api/create-order to create order in Razorpay
+ * 2. Launches Razorpay modal with order_id and options
+ * 3. On success, calls POST /api/verify-payment with razorpay_payment_id, razorpay_order_id, razorpay_signature
+ * 4. Handles modal dismiss (cancellation) and payment failure events
+ */
+export async function initiateRazorpayCheckout({
+  amountInPaise,
+  currency = "INR",
+  receipt,
+  name = "Parth Jewellers",
+  description = "Order Payment",
+  prefill,
+  notes,
+  onSuccess,
+  onError,
+  onDismiss,
+}: InitiateCheckoutOptions): Promise<void> {
+  // Ensure Razorpay SDK script is loaded
+  const isLoaded = await loadRazorpayScript();
+  if (!isLoaded) {
+    const err = new Error(
+      "Razorpay SDK failed to load. Please check your internet connection."
+    );
+    onError?.(err);
+    throw err;
+  }
+
+  const razorpayKeyId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+  if (!razorpayKeyId) {
+    const err = new Error(
+      "NEXT_PUBLIC_RAZORPAY_KEY_ID is not configured in environment variables."
+    );
+    onError?.(err);
+    throw err;
+  }
+
+  // Step 1: Create Order via Backend API
+  let createOrderResponse;
+  try {
+    const res = await fetch("/api/create-order", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        amount: amountInPaise,
+        currency,
+        receipt,
+        notes,
+      }),
+    });
+
+    createOrderResponse = await res.json();
+
+    if (!res.ok) {
+      throw new Error(
+        createOrderResponse.error || "Failed to create Razorpay order"
+      );
+    }
+  } catch (err: any) {
+    onError?.(err);
+    throw err;
+  }
+
+  const { order_id, amount: orderAmount, currency: orderCurrency } =
+    createOrderResponse;
+
+  // Step 2: Open Razorpay Checkout Modal
+  return new Promise<void>((resolve, reject) => {
+    let paymentCompleted = false;
+
+    const options = {
+      key: razorpayKeyId,
+      amount: orderAmount,
+      currency: orderCurrency || currency,
+      name,
+      description,
+      order_id,
+      prefill: {
+        name: prefill?.name || "",
+        email: prefill?.email || "",
+        contact: prefill?.contact || "",
+      },
+      notes: notes || {},
+      theme: {
+        color: "#c69214", // Accent gold matching Parth Jewellers theme
+      },
+      modal: {
+        ondismiss: () => {
+          if (!paymentCompleted) {
+            onDismiss?.();
+            resolve();
+          }
+        },
+      },
+      handler: async function (response: RazorpaySuccessResponse) {
+        paymentCompleted = true;
+        // Step 3: Verify Payment Signature via Backend API
+        try {
+          const verifyRes = await fetch("/api/verify-payment", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            }),
+          });
+
+          const verifyData = await verifyRes.json();
+
+          if (!verifyRes.ok || !verifyData.success) {
+            const err = new Error(
+              verifyData.error || "Payment signature verification failed."
+            );
+            onError?.(err);
+            reject(err);
+            return;
+          }
+
+          onSuccess?.(verifyData);
+          resolve();
+        } catch (err: any) {
+          onError?.(err);
+          reject(err);
+        }
+      },
+    };
+
+    const rzp = new (window as any).Razorpay(options);
+
+    // Listen for payment failure
+    rzp.on("payment.failed", function (failResponse: RazorpayPaymentFailureResponse) {
+      const errorDescription =
+        failResponse.error?.description ||
+        failResponse.error?.reason ||
+        "Payment failed. Please try again.";
+      const err = new Error(errorDescription);
+      onError?.(err);
+      reject(err);
+    });
+
+    rzp.open();
+  });
+}
+</file>
+
+<file path="src/lib/razorpay.ts">
+import crypto from "crypto";
+import Razorpay from "razorpay";
+
+export function getRazorpayClient(): Razorpay {
+  const key_id = process.env.RAZORPAY_KEY_ID;
+  const key_secret = process.env.RAZORPAY_KEY_SECRET;
+
+  if (!key_id || !key_secret) {
+    throw new Error(
+      "Razorpay API keys are missing. Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET environment variables."
+    );
+  }
+
+  return new Razorpay({
+    key_id,
+    key_secret,
+  });
+}
+
+export function verifyPaymentSignature({
+  orderId,
+  paymentId,
+  signature,
+}: {
+  orderId: string;
+  paymentId: string;
+  signature: string;
+}): boolean {
+  const secret = process.env.RAZORPAY_KEY_SECRET;
+  if (!secret) {
+    throw new Error("RAZORPAY_KEY_SECRET is not configured");
+  }
+
+  const payload = `${orderId}|${paymentId}`;
+  const generatedSignature = crypto
+    .createHmac("sha256", secret)
+    .update(payload)
+    .digest("hex");
+
+  // Constant-time comparison to prevent timing attacks
+  const generatedBuffer = Buffer.from(generatedSignature, "utf-8");
+  const providedBuffer = Buffer.from(signature, "utf-8");
+
+  if (generatedBuffer.length !== providedBuffer.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(generatedBuffer, providedBuffer);
+}
+</file>
 
 <file path=".agents/skills/prisma-cli/references/agent-safety.md">
 # AI safety checkpoint for destructive commands
@@ -12253,6 +13185,265 @@ export const catalogueCategories = [
 ] as const;
 </file>
 
+<file path="prisma/seed.ts">
+import "dotenv/config";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "../src/generated/prisma/client";
+import { catalogueCategories } from "./seed/catalogue";
+
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL!,
+});
+const prisma = new PrismaClient({ adapter });
+
+async function main() {
+  console.log("🌱 Starting database seed...");
+
+  // ----------------------------------------------------
+  // 1. Seed Categories (Upsert all 29 categories)
+  // ----------------------------------------------------
+  console.log("📂 Seeding 29 categories...");
+  const categoryMap = new Map<string, string>();
+
+  for (const cat of catalogueCategories) {
+    // Map category images if available
+    let imagePath: string | undefined = undefined;
+    if (["rings", "earrings", "bracelets", "necklaces"].includes(cat.slug)) {
+      imagePath = `/images/categories/${cat.slug}.jpg`;
+    }
+
+    const savedCategory = await prisma.category.upsert({
+      where: { slug: cat.slug },
+      update: {
+        name: cat.name,
+        description: cat.description,
+        image: imagePath,
+      },
+      create: {
+        name: cat.name,
+        slug: cat.slug,
+        description: cat.description,
+        image: imagePath,
+      },
+    });
+
+    categoryMap.set(savedCategory.slug, savedCategory.id);
+  }
+
+  console.log(`✅ Seeded ${categoryMap.size} categories.`);
+
+  // ----------------------------------------------------
+  // 2. Seed Initial Products with Images & Stock
+  // ----------------------------------------------------
+  console.log("💍 Seeding products...");
+
+  const initialProducts = [
+    {
+      name: "Eternal Solitaire Gold Ring",
+      slug: "eternal-solitaire-gold-ring",
+      sku: "RNG-GLD-001",
+      shortDescription: "A classic 22K yellow gold solitaire ring with refined detailing.",
+      description: "Handcrafted in pure 22K gold, this timeless solitaire ring balances modern luxury with heritage craftsmanship.",
+      categorySlug: "rings",
+      metal: "GOLD" as const,
+      purity: "K22" as const,
+      netWeight: 4.5,
+      makingChargeType: "FIXED" as const,
+      makingChargeValue: 1200,
+      fixedPrice: 38500,
+      pricingStrategy: "FIXED" as const,
+      audience: "WOMEN" as const,
+      isFeatured: true,
+      image: "/images/products/product-1.jpg",
+    },
+    {
+      name: "Royal Heritage Chandbali Earrings",
+      slug: "royal-heritage-chandbali-earrings",
+      sku: "EAR-GLD-002",
+      shortDescription: "Exquisite 22K gold drop earrings designed for celebratory moments.",
+      description: "Featuring intricate filigree work and delicate finish, these earrings evoke traditional royal grandeur.",
+      categorySlug: "earrings",
+      metal: "GOLD" as const,
+      purity: "K22" as const,
+      netWeight: 8.2,
+      makingChargeType: "FIXED" as const,
+      makingChargeValue: 2500,
+      fixedPrice: 68900,
+      pricingStrategy: "FIXED" as const,
+      audience: "WOMEN" as const,
+      isFeatured: true,
+      image: "/images/products/product-2.jpg",
+    },
+    {
+      name: "Artisan Solid Silver Glass",
+      slug: "artisan-solid-silver-glass",
+      sku: "SLV-GLS-003",
+      shortDescription: "Pure 925 sterling silver drinking tumbler.",
+      description: "Crafted in heavy 925 sterling silver, perfect for traditional rituals, health benefits, and premium gifting.",
+      categorySlug: "silver-glass",
+      metal: "SILVER" as const,
+      purity: "SILVER925" as const,
+      netWeight: 120.0,
+      makingChargeType: "FIXED" as const,
+      makingChargeValue: 800,
+      fixedPrice: 12500,
+      pricingStrategy: "FIXED" as const,
+      audience: "GENERAL" as const,
+      isFeatured: true,
+      image: "/images/products/product-3.jpg",
+    },
+    {
+      name: "Classic Minimalist Gold Bracelet",
+      slug: "classic-minimalist-gold-bracelet",
+      sku: "BRC-GLD-004",
+      shortDescription: "Sleek 18K gold chain bracelet for daily elegance.",
+      description: "Understated and luxurious, crafted for everyday wear with a secure hallmark lock.",
+      categorySlug: "bracelets",
+      metal: "GOLD" as const,
+      purity: "K18" as const,
+      netWeight: 6.0,
+      makingChargeType: "FIXED" as const,
+      makingChargeValue: 1500,
+      fixedPrice: 42000,
+      pricingStrategy: "FIXED" as const,
+      audience: "WOMEN" as const,
+      isFeatured: true,
+      image: "/images/products/product-4.jpg",
+    },
+    {
+      name: "Sacred Silver Puja Diya",
+      slug: "sacred-silver-puja-diya",
+      sku: "SLV-DYA-005",
+      shortDescription: "Traditional sterling silver engraved diya.",
+      description: "A consecrated piece of pure silverware designed for home shrines and festive rituals.",
+      categorySlug: "silver-diya",
+      metal: "SILVER" as const,
+      purity: "SILVER925" as const,
+      netWeight: 45.0,
+      makingChargeType: "FIXED" as const,
+      makingChargeValue: 500,
+      fixedPrice: 5800,
+      pricingStrategy: "FIXED" as const,
+      audience: "GENERAL" as const,
+      isFeatured: false,
+      image: "/images/products/product-1.jpg",
+    },
+    {
+      name: "Men's Imperial Gold Kada",
+      slug: "mens-imperial-gold-kada",
+      sku: "KAD-GLD-006",
+      shortDescription: "Heavy 22K solid yellow gold kada for men.",
+      description: "A commanding symbol of strength and heritage, finished with a subtle satin polish.",
+      categorySlug: "kada",
+      metal: "GOLD" as const,
+      purity: "K22" as const,
+      netWeight: 24.5,
+      makingChargeType: "FIXED" as const,
+      makingChargeValue: 4500,
+      fixedPrice: 195000,
+      pricingStrategy: "FIXED" as const,
+      audience: "MEN" as const,
+      isFeatured: true,
+      image: "/images/products/product-2.jpg",
+    },
+    {
+      name: "Sterling Silver Floral Anklet (Payal)",
+      slug: "sterling-silver-floral-anklet",
+      sku: "ANK-SLV-007",
+      shortDescription: "Handmade 925 silver payal with delicate chime bells.",
+      description: "Traditional Indian silver payal crafted with intricate floral motifs and durable clasp.",
+      categorySlug: "anklets",
+      metal: "SILVER" as const,
+      purity: "SILVER925" as const,
+      netWeight: 35.0,
+      makingChargeType: "FIXED" as const,
+      makingChargeValue: 600,
+      fixedPrice: 4200,
+      pricingStrategy: "FIXED" as const,
+      audience: "WOMEN" as const,
+      isFeatured: false,
+      image: "/images/products/product-3.jpg",
+    },
+  ];
+
+  for (const item of initialProducts) {
+    const categoryId = categoryMap.get(item.categorySlug);
+
+    if (!categoryId) {
+      console.warn(`Category ${item.categorySlug} not found. Skipping ${item.name}`);
+      continue;
+    }
+
+    await prisma.product.upsert({
+      where: { slug: item.slug },
+      update: {
+        name: item.name,
+        sku: item.sku,
+        shortDescription: item.shortDescription,
+        description: item.description,
+        categoryId: categoryId,
+        metal: item.metal,
+        purity: item.purity,
+        netWeight: item.netWeight,
+        makingChargeType: item.makingChargeType,
+        makingChargeValue: item.makingChargeValue,
+        fixedPrice: item.fixedPrice,
+        pricingStrategy: item.pricingStrategy,
+        audience: item.audience,
+        isFeatured: item.isFeatured,
+        isActive: true,
+      },
+      create: {
+        name: item.name,
+        slug: item.slug,
+        sku: item.sku,
+        shortDescription: item.shortDescription,
+        description: item.description,
+        categoryId: categoryId,
+        metal: item.metal,
+        purity: item.purity,
+        netWeight: item.netWeight,
+        makingChargeType: item.makingChargeType,
+        makingChargeValue: item.makingChargeValue,
+        fixedPrice: item.fixedPrice,
+        pricingStrategy: item.pricingStrategy,
+        audience: item.audience,
+        isFeatured: item.isFeatured,
+        isActive: true,
+        images: {
+          create: [
+            {
+              imageUrl: item.image,
+              altText: item.name,
+              isPrimary: true,
+              sortOrder: 0,
+            },
+          ],
+        },
+        inventory: {
+          create: {
+            quantity: 15,
+            lowStockThreshold: 3,
+          },
+        },
+      },
+    });
+  }
+
+  console.log(`✅ Seeded ${initialProducts.length} sample products with images & stock.`);
+  console.log("✨ Seeding completed successfully!");
+}
+
+main()
+  .catch((e) => {
+    console.error("❌ Seeding failed:", e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
+</file>
+
 <file path="public/file.svg">
 <svg fill="none" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 13.5V5.41a1 1 0 0 0-.3-.7L9.8.29A1 1 0 0 0 9.08 0H1.5v13.5A2.5 2.5 0 0 0 4 16h8a2.5 2.5 0 0 0 2.5-2.5m-1.5 0v-7H8v-5H3v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1M9.5 5V2.12L12.38 5zM5.13 5h-.62v1.25h2.12V5zm-.62 3h7.12v1.25H4.5zm.62 3h-.62v1.25h7.12V11z" clip-rule="evenodd" fill="#666" fill-rule="evenodd"/></svg>
 </file>
@@ -13405,82 +14596,6 @@ export default function PrivacyPolicyPage() {
 }
 </file>
 
-<file path="src/app/(storefront)/returns/page.tsx">
-import { Container } from "@/components/layout/container";
-
-export default function ReturnsPage() {
-  return (
-    <Container className="py-16 sm:py-20">
-      <div className="mx-auto max-w-4xl">
-        <p className="mb-4 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-          Returns & Exchange
-        </p>
-
-        <h1 className="font-display text-4xl tracking-tight text-foreground sm:text-5xl">
-          A clear and considerate returns process.
-        </h1>
-
-        <div className="mt-8 space-y-8 text-base leading-7 text-muted-foreground">
-          <section className="border-b border-border pb-6">
-            <h2 className="font-display text-2xl text-foreground">Eligibility</h2>
-            <p className="mt-3">
-              Return or exchange eligibility will be determined in line with the store&apos;s
-              final policy and the condition of the item at the time it is returned.
-              Detailed conditions will be confirmed by the store.
-            </p>
-          </section>
-
-          <section className="border-b border-border pb-6">
-            <h2 className="font-display text-2xl text-foreground">Return / Exchange Process</h2>
-            <p className="mt-3">
-              Customers may contact the store to initiate a return or exchange request.
-              The specific steps, timelines, and required documentation will be confirmed
-              by the store before any request is processed.
-            </p>
-          </section>
-
-          <section className="border-b border-border pb-6">
-            <h2 className="font-display text-2xl text-foreground">Condition of Items</h2>
-            <p className="mt-3">
-              Items must be returned in their original condition, as appropriate to the
-              type of product and according to the store&apos;s final policy. Detailed factors
-              will be confirmed by the store.
-            </p>
-          </section>
-
-          <section className="border-b border-border pb-6">
-            <h2 className="font-display text-2xl text-foreground">Refunds</h2>
-            <p className="mt-3">
-              Refund eligibility, method, and timing may vary depending on the product,
-              order circumstances, and the final policy set by the store. Detailed terms
-              will be confirmed by the store.
-            </p>
-          </section>
-
-          <section className="border-b border-border pb-6">
-            <h2 className="font-display text-2xl text-foreground">Non-Returnable Items</h2>
-            <p className="mt-3">
-              Certain items may be non-returnable or subject to additional conditions,
-              depending on the nature of the purchase and the final policy applied by the
-              store. Details will be confirmed by the store.
-            </p>
-          </section>
-
-          <section>
-            <h2 className="font-display text-2xl text-foreground">Damaged or Incorrect Orders</h2>
-            <p className="mt-3">
-              If an item is damaged, incorrect, or otherwise not as expected, the store
-              will review the matter and advise on the next steps. The final process and
-              timelines will be confirmed by the store.
-            </p>
-          </section>
-        </div>
-      </div>
-    </Container>
-  );
-}
-</file>
-
 <file path="src/app/(storefront)/shipping/page.tsx">
 import { Container } from "@/components/layout/container";
 
@@ -13777,6 +14892,31 @@ Content-Type: application/json
 {
   "email": "ksehgal2003@gmail.com",
   "otp": "554973"
+}
+
+###
+
+# Razorpay: Create Order (minimum 100 paise = ₹1)
+POST http://localhost:3000/api/create-order
+Content-Type: application/json
+
+{
+  "amount": 50000,
+  "currency": "INR",
+  "receipt": "rcpt_manual_test_01"
+}
+
+###
+
+# Razorpay: Verify Payment Signature
+POST http://localhost:3000/api/verify-payment
+Content-Type: application/json
+
+{
+  "razorpay_order_id": "order_test_123",
+  "razorpay_payment_id": "pay_test_456",
+  "razorpay_signature": "your_test_signature"
+}
 }
 </file>
 
@@ -14790,90 +15930,69 @@ export function Footer() {
 }
 </file>
 
-<file path="src/components/layout/header.tsx">
-import Link from "next/link";
+<file path="src/components/layout/header-search.tsx">
+"use client";
 
-import {
-  Heart,
-  Search,
-  User,
-} from "lucide-react";
+import { type FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
 
-import { siteConfig } from "@/config/site";
-import { CartTrigger } from "@/components/storefront/cart/cart-trigger";
+import { Search, X } from "lucide-react";
 
-import { Container } from "./container";
-import { MobileNavigation } from "./mobile-navigation";
+export function HeaderSearch() {
+  const router = useRouter();
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
-export function Header() {
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const query = searchQuery.trim();
+
+    if (!query) {
+      return;
+    }
+
+    router.push(`/shop?q=${encodeURIComponent(query)}`);
+    setIsExpanded(false);
+  }
+
+  if (!isExpanded) {
+    return (
+      <button
+        type="button"
+        aria-label="Search"
+        onClick={() => setIsExpanded(true)}
+        className="inline-flex size-9 items-center justify-center rounded-md transition-colors hover:bg-secondary"
+      >
+        <Search className="size-5" />
+      </button>
+    );
+  }
+
   return (
-    <header className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-      <Container>
-        <div className="flex h-16 items-center justify-between lg:h-20">
-          {/* Mobile Navigation */}
-          <div className="flex items-center gap-3 lg:hidden">
-            <MobileNavigation />
-
-            <Link
-              href="/"
-              className="font-display text-2xl tracking-tight"
-            >
-              Parth Jewellers
-            </Link>
-          </div>
-
-          {/* Desktop Logo */}
-          <Link
-            href="/"
-            className="hidden font-display text-3xl tracking-tight lg:block"
-          >
-            Parth Jewellers
-          </Link>
-
-          {/* Desktop Navigation */}
-          <nav className="hidden items-center gap-8 lg:flex">
-            {siteConfig.navigation.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="text-sm tracking-wide text-foreground transition-colors hover:text-accent"
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-
-          {/* Actions */}
-          <div className="flex items-center gap-1 sm:gap-2">
-            <button
-              type="button"
-              aria-label="Search"
-              className="inline-flex size-9 items-center justify-center rounded-md transition-colors hover:bg-secondary"
-            >
-              <Search className="size-5" />
-            </button>
-
-            <button
-              type="button"
-              aria-label="Wishlist"
-              className="hidden size-9 items-center justify-center rounded-md transition-colors hover:bg-secondary sm:inline-flex"
-            >
-              <Heart className="size-5" />
-            </button>
-
-            <Link
-              href="/account"
-              aria-label="Account"
-              className="hidden size-9 items-center justify-center rounded-md transition-colors hover:bg-secondary sm:inline-flex"
-            >
-              <User className="size-5" />
-            </Link>
-
-            <CartTrigger />
-          </div>
-        </div>
-      </Container>
-    </header>
+    <form
+      onSubmit={handleSubmit}
+      className="flex items-center border border-border bg-background"
+    >
+      <Search className="ml-3 size-4 shrink-0 text-muted-foreground" />
+      <input
+        type="search"
+        value={searchQuery}
+        onChange={(event) => setSearchQuery(event.target.value)}
+        placeholder="Search jewellery..."
+        aria-label="Search jewellery"
+        autoFocus
+        className="h-9 w-32 bg-transparent px-2 text-sm outline-none placeholder:text-muted-foreground sm:w-48"
+      />
+      <button
+        type="button"
+        aria-label="Close search"
+        onClick={() => setIsExpanded(false)}
+        className="inline-flex size-9 items-center justify-center transition-colors hover:bg-secondary"
+      >
+        <X className="size-4" />
+      </button>
+    </form>
   );
 }
 </file>
@@ -15269,125 +16388,256 @@ export function CartTrigger() {
 "use client";
 
 import { useState } from "react";
-
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useCartStore } from "@/features/cart/store";
+import { initiateRazorpayCheckout } from "@/lib/razorpay-client";
+import { toast } from "sonner";
+import { CheckCircle2, ShieldCheck } from "lucide-react";
+
+interface PaymentSuccessData {
+  order_id: string;
+  payment_id: string;
+}
 
 export function CheckoutForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [paymentSuccess, setPaymentSuccess] = useState<PaymentSuccessData | null>(
+    null
+  );
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  const subtotal = useCartStore((state) => state.getSubtotal());
+  const clearCart = useCartStore((state) => state.clearCart);
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setErrorMessage(null);
+
+    const formData = new FormData(event.currentTarget);
+    const email = (formData.get("email") as string) || "";
+    const phone = (formData.get("phone") as string) || "";
+    const firstName = (formData.get("firstName") as string) || "";
+    const lastName = (formData.get("lastName") as string) || "";
+    const addressLine1 = (formData.get("addressLine1") as string) || "";
+    const city = (formData.get("city") as string) || "";
+    const state = (formData.get("state") as string) || "";
+    const postalCode = (formData.get("postalCode") as string) || "";
+
+    const fullName = `${firstName} ${lastName}`.trim();
+
+    // Determine checkout amount (paise)
+    // If cart has items, use cart subtotal. For testing/demo with empty cart, use test minimum ₹1 (100 paise)
+    let amountInPaise = Math.round(subtotal * 100);
+    if (amountInPaise < 100) {
+      amountInPaise = 100; // minimum ₹1 for testing / demo
+      toast.info("Cart is empty or ₹0. Using test amount of ₹1.00 (100 paise).");
+    }
 
     setIsSubmitting(true);
 
-    // Temporary frontend-only checkout.
-    // Payment integration will be added later.
-    setTimeout(() => {
+    try {
+      await initiateRazorpayCheckout({
+        amountInPaise,
+        currency: "INR",
+        receipt: `rcpt_${Date.now()}`,
+        name: "Parth Jewellers",
+        description: "Jewellery Order Payment",
+        prefill: {
+          name: fullName,
+          email,
+          contact: phone,
+        },
+        notes: {
+          shipping_address: `${addressLine1}, ${city}, ${state} - ${postalCode}`,
+        },
+        onSuccess: (result) => {
+          setIsSubmitting(false);
+          clearCart();
+          setPaymentSuccess({
+            order_id: result.order_id,
+            payment_id: result.payment_id,
+          });
+          toast.success("Payment verified successfully!");
+        },
+        onError: (err) => {
+          setIsSubmitting(false);
+          const msg =
+            typeof err === "string"
+              ? err
+              : err.message || "Payment processing failed";
+          setErrorMessage(msg);
+          toast.error(msg);
+        },
+        onDismiss: () => {
+          setIsSubmitting(false);
+          toast.info("Payment was cancelled.");
+        },
+      });
+    } catch (err: any) {
       setIsSubmitting(false);
-    }, 1000);
+      const msg = err.message || "Unable to initiate payment";
+      setErrorMessage(msg);
+      toast.error(msg);
+    }
+  }
+
+  if (paymentSuccess) {
+    return (
+      <div className="rounded-lg border border-border bg-card p-8 text-center space-y-6">
+        <div className="flex justify-center">
+          <CheckCircle2 className="h-16 w-16 text-emerald-500 animate-in fade-in zoom-in" />
+        </div>
+        <h2 className="font-display text-3xl font-medium">Payment Successful!</h2>
+        <p className="text-muted-foreground max-w-md mx-auto text-sm leading-6">
+          Thank you for your order with Parth Jewellers. Your payment has been
+          verified and your order is now being processed.
+        </p>
+        <div className="bg-secondary/50 rounded-md p-4 max-w-md mx-auto text-left text-xs font-mono space-y-1">
+          <div>
+            <span className="text-muted-foreground">Order ID: </span>
+            <span className="font-semibold text-foreground">
+              {paymentSuccess.order_id}
+            </span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Payment ID: </span>
+            <span className="font-semibold text-foreground">
+              {paymentSuccess.payment_id}
+            </span>
+          </div>
+        </div>
+        <div className="pt-4 flex flex-col sm:flex-row gap-3 justify-center">
+          <Button asChild variant="outline">
+            <Link href="/shop">Continue Shopping</Link>
+          </Button>
+          <Button asChild>
+            <Link href="/account">View Orders</Link>
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="space-y-10"
-    >
-      {/* Contact Information */}
-      <section>
-        <h2 className="font-display text-2xl">
-          Contact Information
-        </h2>
+    <>
+      <form onSubmit={handleSubmit} className="space-y-10">
+        {errorMessage && (
+          <div className="rounded-md border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive">
+            {errorMessage}
+          </div>
+        )}
 
-        <div className="mt-6 grid gap-4">
-          <Input
-            type="email"
-            name="email"
-            placeholder="Email address"
-            required
-          />
+        {/* Contact Information */}
+        <section>
+          <h2 className="font-display text-2xl">Contact Information</h2>
 
-          <Input
-            type="tel"
-            name="phone"
-            placeholder="Phone number"
-            required
-          />
-        </div>
-      </section>
-
-      {/* Shipping Address */}
-      <section>
-        <h2 className="font-display text-2xl">
-          Shipping Address
-        </h2>
-
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <Input
-            name="firstName"
-            placeholder="First name"
-            required
-          />
-
-          <Input
-            name="lastName"
-            placeholder="Last name"
-            required
-          />
-
-          <div className="sm:col-span-2">
+          <div className="mt-6 grid gap-4">
             <Input
-              name="addressLine1"
-              placeholder="Address"
+              type="email"
+              name="email"
+              placeholder="Email address"
+              defaultValue="customer@example.com"
+              required
+            />
+
+            <Input
+              type="tel"
+              name="phone"
+              placeholder="Phone number (e.g. 9876543210)"
+              defaultValue="9876543210"
               required
             />
           </div>
+        </section>
 
-          <div className="sm:col-span-2">
+        {/* Shipping Address */}
+        <section>
+          <h2 className="font-display text-2xl">Shipping Address</h2>
+
+          <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <Input
-              name="addressLine2"
-              placeholder="Apartment, suite, etc. (optional)"
+              name="firstName"
+              placeholder="First name"
+              defaultValue="Kunal"
+              required
+            />
+
+            <Input
+              name="lastName"
+              placeholder="Last name"
+              defaultValue="Sehgal"
+              required
+            />
+
+            <div className="sm:col-span-2">
+              <Input
+                name="addressLine1"
+                placeholder="Address"
+                defaultValue="123 Jewel Lane, Sector 15"
+                required
+              />
+            </div>
+
+            <div className="sm:col-span-2">
+              <Input
+                name="addressLine2"
+                placeholder="Apartment, suite, etc. (optional)"
+              />
+            </div>
+
+            <Input
+              name="city"
+              placeholder="City"
+              defaultValue="Jaipur"
+              required
+            />
+
+            <Input
+              name="state"
+              placeholder="State"
+              defaultValue="Rajasthan"
+              required
+            />
+
+            <Input
+              name="postalCode"
+              placeholder="PIN code"
+              defaultValue="302001"
+              required
+            />
+
+            <Input
+              name="country"
+              placeholder="Country"
+              defaultValue="India"
+              required
             />
           </div>
+        </section>
 
-          <Input
-            name="city"
-            placeholder="City"
-            required
-          />
+        <div className="space-y-3">
+          <Button
+            type="submit"
+            size="lg"
+            className="w-full text-base font-medium py-6"
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              "Opening Razorpay Payment..."
+            ) : (
+              `Pay ${subtotal > 0 ? `₹${subtotal.toLocaleString("en-IN")}` : "₹1.00 (Test)"} with Razorpay`
+            )}
+          </Button>
 
-          <Input
-            name="state"
-            placeholder="State"
-            required
-          />
-
-          <Input
-            name="postalCode"
-            placeholder="PIN code"
-            required
-          />
-
-          <Input
-            name="country"
-            placeholder="Country"
-            defaultValue="India"
-            required
-          />
+          <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+            <ShieldCheck className="h-4 w-4 text-emerald-600" />
+            100% Secure Payment powered by Razorpay Standard Checkout
+          </p>
         </div>
-      </section>
-
-      <Button
-        type="submit"
-        size="lg"
-        className="w-full"
-        disabled={isSubmitting}
-      >
-        {isSubmitting
-          ? "Processing..."
-          : "Proceed to Payment"}
-      </Button>
-    </form>
+      </form>
+    </>
   );
 }
 </file>
@@ -15870,43 +17120,6 @@ export function ShopHeader({ productCount }: ShopHeaderProps) {
         </div>
       </Container>
     </section>
-  );
-}
-</file>
-
-<file path="src/components/storefront/shop/shop-toolbar.tsx">
-"use client";
-
-import { Search } from "lucide-react";
-
-import { Input } from "@/components/ui/input";
-
-type ShopToolbarProps = {
-  searchQuery: string;
-  onSearchChange: (value: string) => void;
-};
-
-export function ShopToolbar({
-  searchQuery,
-  onSearchChange,
-}: ShopToolbarProps) {
-  return (
-    <div className="border-y border-border">
-      <div className="container flex items-center justify-between gap-4 py-4">
-        <div className="relative w-full max-w-md">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-
-          <Input
-            value={searchQuery}
-            onChange={(event) =>
-              onSearchChange(event.target.value)
-            }
-            placeholder="Search jewellery..."
-            className="pl-10"
-          />
-        </div>
-      </div>
-    </div>
   );
 }
 </file>
@@ -17825,23 +19038,6 @@ const config = {
 export default config;
 </file>
 
-<file path="prisma.config.ts">
-// This file was generated by Prisma, and assumes you have installed the following:
-// npm install --save-dev prisma dotenv
-import "dotenv/config";
-import { defineConfig } from "prisma/config";
-
-export default defineConfig({
-  schema: "prisma/schema.prisma",
-  migrations: {
-    path: "prisma/migrations",
-  },
-  datasource: {
-    url: process.env["DATABASE_URL"],
-  },
-});
-</file>
-
 <file path="README.md">
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
@@ -18164,6 +19360,164 @@ export default async function ProductPage({
 
       <RelatedProducts products={relatedProducts} />
     </>
+  );
+}
+</file>
+
+<file path="src/app/(storefront)/returns/page.tsx">
+import { Container } from "@/components/layout/container";
+
+export default function ReturnsPage() {
+  return (
+    <Container className="py-16 sm:py-20">
+      <div className="mx-auto max-w-4xl">
+        <p className="mb-4 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+          Returns & Exchange
+        </p>
+
+        <h1 className="font-display text-4xl tracking-tight text-foreground sm:text-5xl">
+          A clear and considerate returns process!
+        </h1>
+
+        <div className="mt-8 space-y-8 text-base leading-7 text-muted-foreground">
+          <section className="border-b border-border pb-6">
+            <h2 className="font-display text-2xl text-foreground">Eligibility</h2>
+            <p className="mt-3">
+              Return or exchange eligibility will be determined in line with the store&apos;s
+              final policy and the condition of the item at the time it is returned.
+              Detailed conditions will be confirmed by the store.
+            </p>
+          </section>
+
+          <section className="border-b border-border pb-6">
+            <h2 className="font-display text-2xl text-foreground">Return / Exchange Process</h2>
+            <p className="mt-3">
+              Customers may contact the store to initiate a return or exchange request.
+              The specific steps, timelines, and required documentation will be confirmed
+              by the store before any request is processed.
+            </p>
+          </section>
+
+          <section className="border-b border-border pb-6">
+            <h2 className="font-display text-2xl text-foreground">Condition of Items</h2>
+            <p className="mt-3">
+              Items must be returned in their original condition, as appropriate to the
+              type of product and according to the store&apos;s final policy. Detailed factors
+              will be confirmed by the store.
+            </p>
+          </section>
+
+          <section className="border-b border-border pb-6">
+            <h2 className="font-display text-2xl text-foreground">Refunds</h2>
+            <p className="mt-3">
+              Refund eligibility, method, and timing may vary depending on the product,
+              order circumstances, and the final policy set by the store. Detailed terms
+              will be confirmed by the store.
+            </p>
+          </section>
+
+          <section className="border-b border-border pb-6">
+            <h2 className="font-display text-2xl text-foreground">Non-Returnable Items</h2>
+            <p className="mt-3">
+              Certain items may be non-returnable or subject to additional conditions,
+              depending on the nature of the purchase and the final policy applied by the
+              store. Details will be confirmed by the store.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="font-display text-2xl text-foreground">Damaged or Incorrect Orders</h2>
+            <p className="mt-3">
+              If an item is damaged, incorrect, or otherwise not as expected, the store
+              will review the matter and advise on the next steps. The final process and
+              timelines will be confirmed by the store.
+            </p>
+          </section>
+        </div>
+      </div>
+    </Container>
+  );
+}
+</file>
+
+<file path="src/components/layout/header.tsx">
+import Link from "next/link";
+
+import {
+  Heart,
+  User,
+} from "lucide-react";
+
+import { siteConfig } from "@/config/site";
+import { CartTrigger } from "@/components/storefront/cart/cart-trigger";
+
+import { Container } from "./container";
+import { HeaderSearch } from "./header-search";
+import { MobileNavigation } from "./mobile-navigation";
+
+export function Header() {
+  return (
+    <header className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      <Container>
+        <div className="flex h-16 items-center justify-between lg:h-20">
+          {/* Mobile Navigation */}
+          <div className="flex items-center gap-3 lg:hidden">
+            <MobileNavigation />
+
+            <Link
+              href="/"
+              className="font-display text-2xl tracking-tight"
+            >
+              Parth Jewellers
+            </Link>
+          </div>
+
+          {/* Desktop Logo */}
+          <Link
+            href="/"
+            className="hidden font-display text-3xl tracking-tight lg:block"
+          >
+            Parth Jewellers
+          </Link>
+
+          {/* Desktop Navigation */}
+          <nav className="hidden items-center gap-8 lg:flex">
+            {siteConfig.navigation.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="text-sm tracking-wide text-foreground transition-colors hover:text-accent"
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+
+          {/* Actions */}
+          <div className="flex items-center gap-1 sm:gap-2">
+            <HeaderSearch />
+
+            <button
+              type="button"
+              aria-label="Wishlist"
+              className="hidden size-9 items-center justify-center rounded-md transition-colors hover:bg-secondary sm:inline-flex"
+            >
+              <Heart className="size-5" />
+            </button>
+
+            <Link
+              href="/account"
+              aria-label="Account"
+              className="hidden size-9 items-center justify-center rounded-md transition-colors hover:bg-secondary sm:inline-flex"
+            >
+              <User className="size-5" />
+            </Link>
+
+            <CartTrigger />
+          </div>
+        </div>
+      </Container>
+    </header>
   );
 }
 </file>
@@ -18579,60 +19933,9 @@ export function ProductGrid({
 }
 </file>
 
-<file path="src/components/storefront/shop/shop-client.tsx">
-"use client";
-
-import { useMemo, useState } from "react";
-
-import { EmptyProducts } from "./empty-products";
-import { ProductGrid } from "./product-grid";
-import { ShopToolbar } from "./shop-toolbar";
-
-import type { StorefrontProduct } from "@/features/products/types/product";
-
-type ShopClientProps = {
-  products: StorefrontProduct[];
-};
-
-export function ShopClient({
-  products,
-}: ShopClientProps) {
-  const [searchQuery, setSearchQuery] = useState("");
-
-  const filteredProducts = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-
-    if (!query) {
-      return products;
-    }
-
-    return products.filter((product) =>
-      [
-        product.name,
-        product.category,
-        product.description,
-        product.weight ?? "",
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(query),
-    );
-  }, [products, searchQuery]);
-
-  return (
-    <>
-      <ShopToolbar
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-      />
-
-      {filteredProducts.length > 0 ? (
-        <ProductGrid products={filteredProducts} />
-      ) : (
-        <EmptyProducts />
-      )}
-    </>
-  );
+<file path="src/components/storefront/shop/shop-toolbar.tsx">
+export function ShopToolbar() {
+  return null;
 }
 </file>
 
@@ -18943,34 +20246,23 @@ next-env.d.ts
 /src/generated/prisma
 </file>
 
-<file path="src/app/(storefront)/shop/page.tsx">
-import { ShopClient } from "@/components/storefront/shop/shop-client";
-import { ShopHeader } from "@/components/storefront/shop/shop-header";
+<file path="prisma.config.ts">
+// This file was generated by Prisma, and assumes you have installed the following:
+// npm install --save-dev prisma dotenv
+import "dotenv/config";
+import { defineConfig } from "prisma/config";
 
-import { getProducts } from "@/features/products";
-
-type ShopPageProps = {
-  searchParams: Promise<{
-    category?: string;
-  }>;
-};
-
-export default async function ShopPage({
-  searchParams,
-}: ShopPageProps) {
-  const { category } = await searchParams;
-  const products = await getProducts({
-    categorySlug: category,
-  });
-
-  return (
-    <>
-      <ShopHeader productCount={products.length} />
-
-      <ShopClient products={products} />
-    </>
-  );
-}
+export default defineConfig({
+  schema: "prisma/schema.prisma",
+  migrations: {
+    path: "prisma/migrations",
+    // @ts-ignore: Prisma CLI requires this at runtime despite missing TS definition
+    seed: "npx tsx prisma/seed.ts",
+  },
+  datasource: {
+    url: process.env["DATABASE_URL"],
+  },
+});
 </file>
 
 <file path="src/app/globals.css">
@@ -19104,6 +20396,8 @@ export const metadata: Metadata = {
     "Discover timeless jewellery crafted for every celebration.",
 };
 
+import { Toaster } from "sonner";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -19113,460 +20407,63 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${manrope.variable} ${cormorant.variable}`}>
         {children}
+        <Toaster position="top-right" richColors />
       </body>
     </html>
   );
 }
 </file>
 
-<file path="ARCHITECTURE.md">
-# NPJ Jewellery E-Commerce Platform Architecture
-
-**Status:** Living architecture source of truth  
-**Last reviewed:** 2026-08-23
-**Current position:** Sprint 7 foundation plus account route foundation
-
-This document describes the architecture that exists in the repository today. Future work is explicitly labeled `PLANNED` and must not be read as implemented behavior.
-
-## Project Overview
-
-NPJ is a full-stack jewellery and silverware e-commerce platform for a local jewellery business. It has two intended interfaces:
-
-- **Customer storefront:** product discovery, product details, cart, checkout, and informational pages.
-- **Admin dashboard:** product, category, inventory, and order management using the same backend and database.
-
-The storefront is substantially complete as a visual and interaction foundation, but its product data is still mock data. The repository is transitioning to Prisma-backed product queries.
-
-## Goals and Development Philosophy
-
-The working balance is:
-
-- Fast delivery for the current MVP.
-- A clean foundation that can be extended without a rewrite.
-- Approximately 50-60% future scalability, without premature enterprise abstractions.
-- Premium visual quality under the Modern Luxury direction: ivory, gold, charcoal, elegant serif display type, and modern sans UI text.
-
-MVP scope is intentionally limited, but it is not a reason to reduce usability or finish quality.
-
-## Current Technology Stack
-
-### Implemented
-
-- Next.js `16.3.0` App Router
-- React `19.2.8`
-- TypeScript `5`
-- Tailwind CSS `4` with `@tailwindcss/postcss`
-- shadcn/ui primitives, Radix UI, and Lucide React
-- Prisma `7.9.1` with the generated client in `src/generated/prisma`
-- PostgreSQL, configured for Neon through `DATABASE_URL`
-- `@prisma/adapter-pg` and `pg`
-- Better Auth `1.6.26` with Prisma adapter
-- Email OTP through Better Auth's email OTP plugin
-- Resend for OTP email delivery
-- Zustand `5.0.15` with `persist` middleware and browser `localStorage` cart persistence
-- Zod, React Hook Form, and date-fns are available for validation/forms/utilities
-
-### Development commands
-
-- `npm run dev`: development server
-- `npm run build`: production build
-- `npm run start`: production server
-- `npm run lint`: ESLint
-
-## Repository Structure
-
-```text
-prisma/
-  schema.prisma                 Prisma source schema
-  migrations/                   PostgreSQL migration history
-src/
-  app/                          App Router layouts, pages, and API routes
-    (storefront)/               Shared customer storefront route group
-    (admin)/admin/              Protected admin route group and dashboard
-    api/auth/[...all]/           Better Auth catch-all API handler
-  actions/                      Server action area; currently sparse
-  components/
-    layout/                     Header, footer, announcement, navigation, container
-    admin/                      Protected dashboard shell, sidebar, and header
-    storefront/                 Home, shop, product, cart, and checkout UI
-    ui/                         Reusable UI primitives
-  config/                       Site configuration
-  constants/                    Metadata, roles, theme, and route constants
-  features/
-    cart/                       Zustand cart store and cart types
-    products/data/              Current mock product catalogue
-  generated/prisma/             Generated Prisma client and model types
-  hooks/                        Shared React hooks area
-  lib/
-    auth/                       Better Auth, session, authorization, OTP/password helpers
-    email/                      Resend transport and email templates
-    prisma/                     Server-only Prisma client
-    validations/                Zod validation area
-  services/                     Service-layer boundaries; product/order services are currently empty
-  styles/                       Shared styles area
-  types/                        Shared domain types
-scripts/
-  promote-admin.ts              Operator-only first-admin promotion script
-public/images/                  Storefront category and product image assets
-```
-
-Generated Prisma files should be regenerated from `prisma/schema.prisma`; they are not the schema source of truth.
-
-## Application Route Architecture
-
-The `(storefront)` folder is a route group, so it does not appear in public URLs. The current implemented public routes are:
-
-- `/` - homepage
-- `/shop` - Prisma-backed product listing, optional category query filtering, and client-side search
-- `/product/[slug]` - mock product detail and related products
-- `/cart` - cart page
-- `/checkout` - checkout UI
-- `/account` - session-aware customer account foundation
-- `/collections` - collections page
-- `/arrivals` - new arrivals page
-- `/about` - about page
-- `/contact` - contact page
-- `/shipping` - shipping information
-- `/returns` - returns information
-- `/privacy-policy` - privacy policy
-- `/terms` - terms
-- Unmatched routes use `src/app/not-found.tsx`.
-
-Implemented API route:
-
-- `/api/auth/[...all]` - GET and POST are forwarded to Better Auth via `toNextJsHandler`.
-
-The protected `/admin` route is implemented under the `(admin)` organizational route group. Its layout performs server-side authorization before rendering child pages. Product and order API/server actions remain `PLANNED`.
-
-## Authentication Architecture
-
-### Implemented
-
-Better Auth is configured in `src/lib/auth/auth.ts` with the Prisma adapter and PostgreSQL provider. The server-side session helper in `src/lib/auth/session.ts` reads request headers and calls `auth.api.getSession`. The browser client is created in `src/lib/auth/auth-client.ts` with the email OTP client plugin.
-
-The Better Auth route handler is the catch-all App Router route at `/api/auth/[...all]`.
-
-The user model supports:
-
-- `CUSTOMER` and `ADMIN` roles
-- `ACTIVE`, `INACTIVE`, and `BLOCKED` statuses
-- Optional first name, last name, and phone
-- Email and phone verification flags
-- Last login timestamp
-
-The authentication configuration enables in-memory rate limiting. Email OTPs are six digits, expire after 300 seconds, and allow three attempts. Sending verification OTPs is limited to three requests per 60-second window. OTP email delivery uses Resend.
-
-Server authorization helpers provide active-user and role checks. The admin layout uses `src/lib/auth/require-admin.ts`, which reads the Better Auth session, verifies the corresponding Prisma user is `ACTIVE` and has the `ADMIN` role, and redirects unauthorized requests to `/`.
-
-There is currently no login route in the repository. The account page therefore renders a truthful unavailable-authentication state when no session is present, while authenticated sessions can view session-provided profile identity and sign out.
-
-### Planned
-
-- Customer account workflows and protected customer features.
-- Review of rate-limit storage before production scaling; current storage is process memory.
-
-## Database Architecture
-
-Prisma uses the PostgreSQL provider and reads `DATABASE_URL` through `prisma.config.ts`. The runtime client uses `PrismaPg` and a development-safe global singleton in `src/lib/prisma/client.ts`. Migration files live under `prisma/migrations`.
-
-Current schema domains:
-
-- **Identity:** `User`, `Account`, `Session`, `Verification`
-- **Addresses:** `Address`
-- **Catalogue:** `Category` with a self-referencing parent/children tree, `Collection`, `Product`, `ProductImage`, `ProductVariant`
-- **Pricing inputs:** `MetalRate`
-- **Stock:** `Inventory`
-- **Commerce:** `Cart`, `CartItem`, `Order`, `OrderItem`, `Payment`, `Coupon`
-- **Engagement/content:** `Review`, `Banner`, `Newsletter`, `StoreSettings`
-
-Important relationships include users to addresses, carts, orders, reviews, accounts, and sessions; products to categories, optional collections, images, variants, inventory, cart items, order items, and reviews; and orders to historical order items, one address, and an optional one-to-one payment.
-
-The current schema already includes PostgreSQL decimal fields for monetary values and weights, enum-backed order/payment states, uniqueness for product slugs/SKUs, variant SKUs, and the product/variant inventory relation. Sprint 6.1 has added explicit audience and pricing fields to `Product`, plus variant-level weight and pricing fields.
-
-### Controlled audit note
-
-The schema is a foundation, not proof that every planned behavior is wired. It currently has product-level `metal`, `purity`, `netWeight`, `makingChargeType`, `makingChargeValue`, `stoneCharge`, and `wastagePercentage`; variants currently have `priceAdjustment` but do not carry their own weight or pricing strategy. It also does not currently contain an explicit audience field or an explicit fixed-price/pricing-strategy field. Sprint 6.1 must audit these gaps before catalogue migration. No schema changes are part of this documentation task.
-
-## Product Architecture
-
-### Current implementation
-
-The visual storefront now consumes `StorefrontProduct` from `src/features/products/types/product.ts`. Server-only query functions in `src/features/products/queries/` fetch active Prisma products, and `src/features/products/utils/product-mappers.ts` converts Decimal values, dates, images, variants, category data, and inventory into serializable storefront data. `/shop` still performs search locally in `ShopClient`, but its input is now server-fetched.
-
-The Prisma product model supports the intended catalogue relationships: category, optional collection, images, variants, inventory, and order/cart references. The older `src/services/product.service.ts` boundary remains empty; product reads are owned by the feature query layer for Sprint 6.3.
-
-### Target model
-
-The normalized product concept is:
-
-```text
-Product
-|- Category
-|- Audience: WOMEN | MEN | KIDS | GENERAL
-|- Material: GOLD | SILVER | future materials
-`- Variants
-```
-
-Audience should be data, not duplicated in category names. For example, `Ring + WOMEN + GOLD` is preferred to a separate `Women's Ring` category. The final model must support jewellery and silverware, including products such as silver diyas, glasses, spoons, bowls, and toys.
-
-Catalogue normalization is complete enough for the current product query contract; further raw catalogue import remains dependent on the catalogue data source.
-
-## Pricing Architecture
-
-### Current implementation
-
-The storefront mapper exposes `Product.fixedPrice` as its display price. Metal-based products without a stored fixed display price expose `null` and render “Price on request”; no live price is fabricated. Fixed-price variant prices use variant fixed price when present, otherwise product fixed price plus `priceAdjustment`. The cart subtotal is still calculated from client-held values.
-
-The Prisma schema stores some required inputs for metal-rate pricing and has a `MetalRate` table keyed uniquely by metal and purity. `ProductVariant.priceAdjustment` exists, but a complete product/variant pricing contract is not implemented.
-
-### Planned pricing contract
-
-The system must support both:
-
-1. **Fixed price:** appropriate for many silverware and fixed-price products.
-2. **Metal-rate based:**
-
-   ```text
-   live metal rate * applicable weight
-   + making charges
-   + additional/stone charges
-   + applicable tax
-   = final selling price
-   ```
-
-Pricing strategy, fixed price, material/metal, purity, weight, making charge type/value, additional charges, stone charges, and tax must be represented at the correct product or variant level. Variant differences such as size, weight, SKU, price, pricing strategy, and inventory must be supported.
-
-Financial values must be calculated and validated on the server for checkout. Client cart prices are display state, not an authority for an order total. This remains `PLANNED` for the payment/order phase.
-
-## Cart and State Management
-
-### Implemented
-
-`src/features/cart/store.ts` defines a Zustand store wrapped with `persist` and uses the storage key `npj-cart`. It stores cart items in browser persistence and supports add, remove, quantity update, clear, item count, and subtotal operations. `CartItem` includes product/variant identifiers, display data, price, and quantity.
-
-The cart is currently a client-side storefront cart. The Prisma `Cart` and `CartItem` models exist for a future persisted/user-linked cart, but synchronization between local storage and database cart data is not implemented.
-
-### Hydration rule
-
-Persisted Zustand state must be read only after safe client hydration. Future components must follow the existing hydration-safe pattern when one is established in the storefront. Do not render persisted browser state as server-rendered initial state, disable SSR globally, or use `suppressHydrationWarning` as a shortcut.
-
-### Planned
-
-- Reconcile guest local cart with a customer cart after authentication.
-- Validate product, variant, availability, and server-calculated price at checkout.
-- Decide whether the database cart becomes authoritative for signed-in users.
-
-## Storefront Architecture
-
-The root layout loads the Cormorant Garamond display font and Manrope UI/body font, global styles, and document metadata. The storefront layout composes the announcement bar, header, main content, and footer.
-
-Storefront UI is organized by concern:
-
-- `components/storefront/home`: hero, categories, featured products, promotion, trust section, newsletter.
-- `components/storefront/shop`: toolbar, search, grid, empty state, header.
-- `components/storefront/product`: gallery, information, details, related products.
-- `components/storefront/cart`: cart items, sheet, trigger.
-- `components/storefront/checkout`: checkout form and order summary.
-
-The homepage featured section, shop, product detail, collections, and new arrivals now use dynamic Prisma-backed queries while preserving the existing UI. Homepage category cards use the catalogue slugs for their `/shop?category=<slug>` links, and the shop query applies that category filter server-side before the existing client-side search. The mock data file remains in place for transition safety and should only be removed after all references are intentionally retired.
-
-## Admin Architecture
-
-### Current state
-
-The `/admin` route group now contains a protected layout and dashboard page. `src/components/admin/admin-shell.tsx` composes the desktop sidebar, header, and content area. `admin-sidebar.tsx` provides desktop navigation and a mobile Sheet drawer. `admin-header.tsx` displays the authenticated admin identity and uses the existing Better Auth client for sign-out.
-
-The current dashboard scope is intentionally limited to real database metrics: total products, total orders, low-stock inventory rows, total customers, and the five most recent orders. No CRUD workflows or future admin routes are implemented.
-
-The first administrator can be established by an operator with `npm run bootstrap:admin -- <existing-user-email>`. The server-side script looks up the existing user by email and updates only `role` to `ADMIN` and `status` to `ACTIVE`; it is not exposed as an HTTP route.
-
-The customer account route is a session-aware UI foundation at `/account`. It displays only identity supplied by the Better Auth session, provides sign-out for authenticated users, and shows a truthful unavailable-authentication state when no session is present. Customer order history and profile editing are not implemented.
-
-### Planned MVP
-
-```text
-/admin
-|- Overview: total products, active products, low stock, recent orders
-|- Products: list, search, create, edit, delete, enable/disable, variants
-|- Categories: basic management
-`- Orders: basic management
-```
-
-Admin forms must eventually cover basic information, category, audience, material, fixed and metal-rate pricing, variants, inventory, images, and status. Admin CRUD and the customer storefront must use the same product database and pricing rules.
-
-## Payment Architecture
-
-### Current state
-
-The Prisma schema contains `Payment` with gateway identifiers, amount, status, paid time, and a one-to-one relation to `Order`. No payment gateway integration or payment API route is implemented. Cash on Delivery is intentionally excluded from the product direction.
-
-### Planned
-
-Only online payment will be supported. The initial implementation will select one gateway from Razorpay, PayU, or Cashfree. Gateway secrets belong in environment variables and must never be stored in Prisma schema or source code. Payment creation, callback/webhook verification, idempotency, and order state transitions must be server-controlled.
-
-## External Services / Environment Variables
-
-Observed environment-backed integrations:
-
-- `DATABASE_URL`: PostgreSQL/Neon connection string used by Prisma config and the runtime Prisma adapter.
-- `RESEND_API_KEY`: Resend API key used by the email transport.
-- `EMAIL_FROM`: sender address used for OTP email.
-
-Environment files and secrets are not architecture data and must remain outside source control. A metal-rate provider and payment provider are not finalized and therefore have no implemented environment contract yet.
-
-## Current Development Status
-
-### Completed / IMPLEMENTED
-
-- Project foundation and database migrations.
-- Prisma PostgreSQL foundation and generated client.
-- Better Auth foundation with Prisma adapter.
-- Email OTP foundation and Resend email transport.
-- User role/status and authorization groundwork.
-- Premium static storefront shell and visual system.
-- Homepage, shop, product detail, cart, checkout UI, collections, new arrivals, and informational pages.
-- Mock product catalogue and local Zustand cart persistence.
-- 404 handling.
-
-### IN PROGRESS
-
-- Catalogue migration from `mockProducts` to Prisma-backed reads.
-- Sprint 6.2 catalogue normalization/loading for the real catalogue.
-- Server-authoritative pricing and checkout validation.
-
-### Completed in this position
-
-- Sprint 6.3 product query layer, mapper, serializable storefront types, and query helpers.
-- Sprint 6.4 dynamic storefront integration for shop, product detail, featured products, collections, and new arrivals.
-
-### PLANNED / Not yet implemented
-
-- Admin CRUD and future admin workflows.
-- Database/local-cart reconciliation.
-- Pricing calculator and live metal-rate integration.
-- Online payment integration and order processing workflow.
-- Invoice generation.
-
-## Current Sprint
-
-**Sprint 7: Admin Foundation**
-
-Completed in this position: **Sprint 6.1 - Controlled Product Schema Audit and Upgrade**, **Sprint 6.3 - Product Data Layer**, **Sprint 6.4 - Dynamic Storefront**, **Sprint 7.1 - Admin Access & Route Protection**, and **Sprint 7.2 - Admin Dashboard Shell**.
-
-The current admin foundation is limited to protected `/admin` access, a responsive shell, and real read-only overview metrics.
-
-## Planned Next Steps
-
-1. **Sprint 6.2:** Complete normalization/loading of the client's raw catalogue into internal product, audience, material, category, and variant data.
-2. Add server-authoritative pricing and checkout validation when the order/payment phase begins.
-3. Add admin product, category, inventory, and order workflows only in their dedicated future sprints.
-
-Each step that changes architecture, routes, models, state, integrations, or sprint status must update this document in the same task.
-
-## Post-Delivery Hotlist
-
-### HOTLIST: Invoice system
-
-Target: approximately one week after initial delivery.
-
-The intended flow is:
-
-```text
-Order
--> historical OrderItem snapshots
--> payment / confirmation
--> invoice generation
--> PDF or downloadable invoice
-```
-
-Invoice data must be based on immutable order snapshots so later product price, metadata, or catalogue changes cannot alter historical invoices. The existing `OrderItem` already stores product name, SKU, metal, purity, weight, charges, tax, price, and quantity, but invoice generation and delivery are not implemented.
-
-## Architectural Decision Log
-
-### 2026-08-22 / Sprint 6: Prisma as the shared commerce foundation
-
-**Decision:** Use Prisma with PostgreSQL/Neon as the shared persistence layer for storefront and future admin interfaces.
-
-**Reason:** The platform needs one source for products, variants, inventory, orders, pricing inputs, and authentication data while retaining a fast MVP path.
-
-**Impact:** Product reads, admin CRUD, pricing, inventory, and order workflows must converge on the Prisma models and server-side services.
-
-**Status:** Current; product migration is in progress.
-
-### 2026-08-22 / Sprint 6: Normalize catalogue dimensions
-
-**Decision:** Keep category, audience, and material as separate product dimensions; do not duplicate audience in category names.
-
-**Reason:** The same category must support multiple audiences and materials without catalogue duplication.
-
-**Impact:** Catalogue import, product forms, filters, schema audit, and storefront queries must preserve these dimensions.
-
-**Status:** Planned.
-
-### 2026-08-22 / Sprint 6: Support fixed and metal-rate pricing
-
-**Decision:** The product architecture must support both fixed-price and metal-rate-based selling prices, with pricing data at the appropriate product or variant level.
-
-**Reason:** Jewellery and silverware have different pricing needs, and metal-rate calculations must remain accurate enough to avoid financial loss.
-
-**Impact:** Schema audit, pricing service, metal-rate storage/cache, checkout validation, admin forms, and order snapshots.
-
-**Status:** Planned.
-
-### 2026-08-22 / Foundation: Better Auth with email OTP
-
-**Decision:** Use Better Auth with the Prisma adapter and email OTP as the authentication foundation.
-
-**Reason:** It provides the required session/account/verification persistence while fitting the existing PostgreSQL foundation and passwordless MVP flow.
-
-**Impact:** User, Account, Session, and Verification models; auth API route; OTP email delivery; role/status authorization helpers.
-
-**Status:** Current.
-
-### 2026-08-22 / Foundation: Persist guest cart locally
-
-**Decision:** Use Zustand persist with the `npj-cart` local storage key for the current storefront cart.
-
-**Reason:** It provides a fast guest-cart MVP without requiring account state for basic shopping interactions.
-
-**Impact:** Client cart components, hydration handling, future sign-in cart reconciliation, and checkout validation.
-
-**Status:** Current; database cart synchronization planned.
-
-### 2026-08-22 / Commerce: Online payments only
-
-**Decision:** Exclude Cash on Delivery and implement one online payment gateway initially.
-
-**Reason:** The intended checkout must use verified online payment while keeping the first integration focused.
-
-**Impact:** Payment service, webhook/callback routes, order status transitions, environment variables, and checkout UI.
-
-**Status:** Planned; gateway selection pending.
-
-### 2026-08-23 / Sprint 6.3-6.4: Centralized storefront product mapping
-
-**Decision:** Keep Prisma access in server-only feature queries and pass a mapped `StorefrontProduct` shape to the existing storefront components.
-
-**Reason:** This replaces mock reads without exposing Prisma Decimal values or database relations to React components, and avoids redesigning the current storefront.
-
-**Impact:** Product queries, serialization, product cards, product detail, featured products, collections, arrivals, and the remaining mock-data transition.
-
-**Status:** Current.
-
-## Known Technical Considerations
-
-- `product.service.ts` and `order.service.ts` are empty boundaries; product reads currently live in `src/features/products/queries/`, while order logic remains unimplemented.
-- The mock product file remains in the repository, but active storefront page references have been replaced by dynamic queries.
-- Client cart prices are mutable browser state and cannot be trusted for final order totals.
-- Decimal monetary and weight values must preserve precision across Prisma, pricing calculations, serialization, and UI formatting.
-- Variant-level weight and pricing strategy are not fully represented by the current schema; resolve this during the controlled audit rather than adding ad hoc fields during catalogue import.
-- The schema currently has no explicit audience model/field despite that being part of the target product concept.
-- Better Auth rate limiting currently uses process memory, which is suitable for development but has limits across multiple instances.
-- The external metal-rate provider is not selected. Do not fetch it on every product page request; use a validated normalization and database/cache boundary.
-- Payment callbacks/webhooks must be verified server-side and made idempotent before orders are treated as paid.
-- Historical order and invoice values must be snapshots, not live joins to mutable product data.
-- Authentication, admin authorization, pricing, inventory checks, and payment state transitions are server responsibilities.
-- Any future change to routes, schema, auth, state, integrations, or sprint status must update this living document in the same task.
+<file path="src/components/storefront/shop/shop-client.tsx">
+"use client";
+
+import { useMemo } from "react";
+import { useSearchParams } from "next/navigation";
+
+import { EmptyProducts } from "./empty-products";
+import { ProductGrid } from "./product-grid";
+import type { StorefrontProduct } from "@/features/products/types/product";
+
+type ShopClientProps = {
+  products: StorefrontProduct[];
+};
+
+export function ShopClient({
+  products,
+}: ShopClientProps) {
+  const searchParams = useSearchParams();
+  const currentQuery = searchParams.get("q") || "";
+
+  const filteredProducts = useMemo(() => {
+    const query = currentQuery.trim().toLowerCase();
+
+    if (!query) {
+      return products;
+    }
+
+    return products.filter((product) =>
+      [
+        product.name,
+        product.category,
+        product.description,
+        product.weight ?? "",
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [products, currentQuery]);
+
+  return (
+    <>
+      {filteredProducts.length > 0 ? (
+        <ProductGrid products={filteredProducts} />
+      ) : (
+        <EmptyProducts />
+      )}
+    </>
+  );
+}
 </file>
 
 <file path="prisma/schema.prisma">
@@ -20363,6 +21260,490 @@ model StoreSettings {
 }
 </file>
 
+<file path="src/app/(storefront)/shop/page.tsx">
+import { Suspense } from "react";
+
+import { ShopClient } from "@/components/storefront/shop/shop-client";
+import { ShopHeader } from "@/components/storefront/shop/shop-header";
+
+import { getProducts } from "@/features/products";
+
+type ShopPageProps = {
+  searchParams: Promise<{
+    category?: string;
+  }>;
+};
+
+export default async function ShopPage({
+  searchParams,
+}: ShopPageProps) {
+  const { category } = await searchParams;
+  const products = await getProducts({
+    categorySlug: category,
+  });
+
+  return (
+    <>
+      <ShopHeader productCount={products.length} />
+
+      <Suspense fallback={<div className="min-h-[300px]" />}>
+        <ShopClient products={products} />
+      </Suspense>
+    </>
+  );
+}
+</file>
+
+<file path="ARCHITECTURE.md">
+# NPJ Jewellery E-Commerce Platform Architecture
+
+**Status:** Living architecture source of truth  
+**Last reviewed:** 2026-08-23
+**Current position:** Sprint 7 foundation plus account route foundation
+
+This document describes the architecture that exists in the repository today. Future work is explicitly labeled `PLANNED` and must not be read as implemented behavior.
+
+## Project Overview
+
+NPJ is a full-stack jewellery and silverware e-commerce platform for a local jewellery business. It has two intended interfaces:
+
+- **Customer storefront:** product discovery, product details, cart, checkout, and informational pages.
+- **Admin dashboard:** product, category, inventory, and order management using the same backend and database.
+
+The storefront is substantially complete as a visual and interaction foundation, but its product data is still mock data. The repository is transitioning to Prisma-backed product queries.
+
+## Goals and Development Philosophy
+
+The working balance is:
+
+- Fast delivery for the current MVP.
+- A clean foundation that can be extended without a rewrite.
+- Approximately 50-60% future scalability, without premature enterprise abstractions.
+- Premium visual quality under the Modern Luxury direction: ivory, gold, charcoal, elegant serif display type, and modern sans UI text.
+
+MVP scope is intentionally limited, but it is not a reason to reduce usability or finish quality.
+
+## Current Technology Stack
+
+### Implemented
+
+- Next.js `16.3.0` App Router
+- React `19.2.8`
+- TypeScript `5`
+- Tailwind CSS `4` with `@tailwindcss/postcss`
+- shadcn/ui primitives, Radix UI, and Lucide React
+- Prisma `7.9.1` with the generated client in `src/generated/prisma`
+- PostgreSQL, configured for Neon through `DATABASE_URL`
+- `@prisma/adapter-pg` and `pg`
+- Better Auth `1.6.26` with Prisma adapter
+- Email OTP through Better Auth's email OTP plugin
+- Resend for OTP email delivery
+- Zustand `5.0.15` with `persist` middleware and browser `localStorage` cart persistence
+- Zod, React Hook Form, and date-fns are available for validation/forms/utilities
+
+### Development commands
+
+- `npm run dev`: development server
+- `npm run build`: production build
+- `npm run start`: production server
+- `npm run lint`: ESLint
+
+## Repository Structure
+
+```text
+prisma/
+  schema.prisma                 Prisma source schema
+  migrations/                   PostgreSQL migration history
+src/
+  app/                          App Router layouts, pages, and API routes
+    (storefront)/               Shared customer storefront route group
+    (admin)/admin/              Protected admin route group and dashboard
+    api/auth/[...all]/           Better Auth catch-all API handler
+  actions/                      Server action area; currently sparse
+  components/
+    layout/                     Header, global search, footer, announcement, navigation, container
+    admin/                      Protected dashboard shell, sidebar, and header
+    storefront/                 Home, shop, product, cart, and checkout UI
+    ui/                         Reusable UI primitives
+  config/                       Site configuration
+  constants/                    Metadata, roles, theme, and route constants
+  features/
+    cart/                       Zustand cart store and cart types
+    products/data/              Current mock product catalogue
+  generated/prisma/             Generated Prisma client and model types
+  hooks/                        Shared React hooks area
+  lib/
+    auth/                       Better Auth, session, authorization, OTP/password helpers
+    email/                      Resend transport and email templates
+    prisma/                     Server-only Prisma client
+    validations/                Zod validation area
+  services/                     Service-layer boundaries; product/order services are currently empty
+  styles/                       Shared styles area
+  types/                        Shared domain types
+scripts/
+  promote-admin.ts              Operator-only first-admin promotion script
+public/images/                  Storefront category and product image assets
+```
+
+Generated Prisma files should be regenerated from `prisma/schema.prisma`; they are not the schema source of truth.
+
+## Application Route Architecture
+
+The `(storefront)` folder is a route group, so it does not appear in public URLs. The current implemented public routes are:
+
+- `/` - homepage
+- `/shop` - Prisma-backed product listing, optional category filtering, and URL-driven client-side search
+- `/product/[slug]` - mock product detail and related products
+- `/cart` - cart page
+- `/checkout` - checkout UI
+- `/account` - session-aware customer account foundation
+- `/collections` - collections page
+- `/arrivals` - new arrivals page
+- `/about` - about page
+- `/contact` - contact page
+- `/shipping` - shipping information
+- `/returns` - returns information
+- `/privacy-policy` - privacy policy
+- `/terms` - terms
+- Unmatched routes use `src/app/not-found.tsx`.
+
+Implemented API route:
+
+- `/api/auth/[...all]` - GET and POST are forwarded to Better Auth via `toNextJsHandler`.
+
+The protected `/admin` route is implemented under the `(admin)` organizational route group. Its layout performs server-side authorization before rendering child pages. Product and order API/server actions remain `PLANNED`.
+
+## Authentication Architecture
+
+### Implemented
+
+Better Auth is configured in `src/lib/auth/auth.ts` with the Prisma adapter and PostgreSQL provider. The server-side session helper in `src/lib/auth/session.ts` reads request headers and calls `auth.api.getSession`. The browser client is created in `src/lib/auth/auth-client.ts` with the email OTP client plugin.
+
+The Better Auth route handler is the catch-all App Router route at `/api/auth/[...all]`.
+
+The user model supports:
+
+- `CUSTOMER` and `ADMIN` roles
+- `ACTIVE`, `INACTIVE`, and `BLOCKED` statuses
+- Optional first name, last name, and phone
+- Email and phone verification flags
+- Last login timestamp
+
+The authentication configuration enables in-memory rate limiting. Email OTPs are six digits, expire after 300 seconds, and allow three attempts. Sending verification OTPs is limited to three requests per 60-second window. OTP email delivery uses Resend.
+
+Server authorization helpers provide active-user and role checks. The admin layout uses `src/lib/auth/require-admin.ts`, which reads the Better Auth session, verifies the corresponding Prisma user is `ACTIVE` and has the `ADMIN` role, and redirects unauthorized requests to `/`.
+
+There is currently no login route in the repository. The account page therefore renders a truthful unavailable-authentication state when no session is present, while authenticated sessions can view session-provided profile identity and sign out.
+
+### Planned
+
+- Customer account workflows and protected customer features.
+- Review of rate-limit storage before production scaling; current storage is process memory.
+
+## Database Architecture
+
+Prisma uses the PostgreSQL provider and reads `DATABASE_URL` through `prisma.config.ts`. The runtime client uses `PrismaPg` and a development-safe global singleton in `src/lib/prisma/client.ts`. Migration files live under `prisma/migrations`.
+
+Current schema domains:
+
+- **Identity:** `User`, `Account`, `Session`, `Verification`
+- **Addresses:** `Address`
+- **Catalogue:** `Category` with a self-referencing parent/children tree, `Collection`, `Product`, `ProductImage`, `ProductVariant`
+- **Pricing inputs:** `MetalRate`
+- **Stock:** `Inventory`
+- **Commerce:** `Cart`, `CartItem`, `Order`, `OrderItem`, `Payment`, `Coupon`
+- **Engagement/content:** `Review`, `Banner`, `Newsletter`, `StoreSettings`
+
+Important relationships include users to addresses, carts, orders, reviews, accounts, and sessions; products to categories, optional collections, images, variants, inventory, cart items, order items, and reviews; and orders to historical order items, one address, and an optional one-to-one payment.
+
+The current schema already includes PostgreSQL decimal fields for monetary values and weights, enum-backed order/payment states, uniqueness for product slugs/SKUs, variant SKUs, and the product/variant inventory relation. Sprint 6.1 has added explicit audience and pricing fields to `Product`, plus variant-level weight and pricing fields.
+
+### Controlled audit note
+
+The schema is a foundation, not proof that every planned behavior is wired. It currently has product-level `metal`, `purity`, `netWeight`, `makingChargeType`, `makingChargeValue`, `stoneCharge`, and `wastagePercentage`; variants currently have `priceAdjustment` but do not carry their own weight or pricing strategy. It also does not currently contain an explicit audience field or an explicit fixed-price/pricing-strategy field. Sprint 6.1 must audit these gaps before catalogue migration. No schema changes are part of this documentation task.
+
+## Product Architecture
+
+### Current implementation
+
+The visual storefront now consumes `StorefrontProduct` from `src/features/products/types/product.ts`. Server-only query functions in `src/features/products/queries/` fetch active Prisma products, and `src/features/products/utils/product-mappers.ts` converts Decimal values, dates, images, variants, category data, and inventory into serializable storefront data. `/shop` still performs search locally in `ShopClient`, but its input is now server-fetched.
+
+The Prisma product model supports the intended catalogue relationships: category, optional collection, images, variants, inventory, and order/cart references. The older `src/services/product.service.ts` boundary remains empty; product reads are owned by the feature query layer for Sprint 6.3.
+
+### Target model
+
+The normalized product concept is:
+
+```text
+Product
+|- Category
+|- Audience: WOMEN | MEN | KIDS | GENERAL
+|- Material: GOLD | SILVER | future materials
+`- Variants
+```
+
+Audience should be data, not duplicated in category names. For example, `Ring + WOMEN + GOLD` is preferred to a separate `Women's Ring` category. The final model must support jewellery and silverware, including products such as silver diyas, glasses, spoons, bowls, and toys.
+
+Catalogue normalization is complete enough for the current product query contract; further raw catalogue import remains dependent on the catalogue data source.
+
+## Pricing Architecture
+
+### Current implementation
+
+The storefront mapper exposes `Product.fixedPrice` as its display price. Metal-based products without a stored fixed display price expose `null` and render “Price on request”; no live price is fabricated. Fixed-price variant prices use variant fixed price when present, otherwise product fixed price plus `priceAdjustment`. The cart subtotal is still calculated from client-held values.
+
+The Prisma schema stores some required inputs for metal-rate pricing and has a `MetalRate` table keyed uniquely by metal and purity. `ProductVariant.priceAdjustment` exists, but a complete product/variant pricing contract is not implemented.
+
+### Planned pricing contract
+
+The system must support both:
+
+1. **Fixed price:** appropriate for many silverware and fixed-price products.
+2. **Metal-rate based:**
+
+   ```text
+   live metal rate * applicable weight
+   + making charges
+   + additional/stone charges
+   + applicable tax
+   = final selling price
+   ```
+
+Pricing strategy, fixed price, material/metal, purity, weight, making charge type/value, additional charges, stone charges, and tax must be represented at the correct product or variant level. Variant differences such as size, weight, SKU, price, pricing strategy, and inventory must be supported.
+
+Financial values must be calculated and validated on the server for checkout. Client cart prices are display state, not an authority for an order total. This remains `PLANNED` for the payment/order phase.
+
+## Cart and State Management
+
+### Implemented
+
+`src/features/cart/store.ts` defines a Zustand store wrapped with `persist` and uses the storage key `npj-cart`. It stores cart items in browser persistence and supports add, remove, quantity update, clear, item count, and subtotal operations. `CartItem` includes product/variant identifiers, display data, price, and quantity.
+
+The cart is currently a client-side storefront cart. The Prisma `Cart` and `CartItem` models exist for a future persisted/user-linked cart, but synchronization between local storage and database cart data is not implemented.
+
+### Hydration rule
+
+Persisted Zustand state must be read only after safe client hydration. Future components must follow the existing hydration-safe pattern when one is established in the storefront. Do not render persisted browser state as server-rendered initial state, disable SSR globally, or use `suppressHydrationWarning` as a shortcut.
+
+### Planned
+
+- Reconcile guest local cart with a customer cart after authentication.
+- Validate product, variant, availability, and server-calculated price at checkout.
+- Decide whether the database cart becomes authoritative for signed-in users.
+
+## Storefront Architecture
+
+The root layout loads the Cormorant Garamond display font and Manrope UI/body font, global styles, and document metadata. The storefront layout composes the announcement bar, header, main content, and footer.
+
+Storefront UI is organized by concern:
+
+- `components/storefront/home`: hero, categories, featured products, promotion, trust section, newsletter.
+- `components/storefront/shop`: toolbar, search, grid, empty state, header.
+- `components/storefront/product`: gallery, information, details, related products.
+- `components/storefront/cart`: cart items, sheet, trigger.
+- `components/storefront/checkout`: checkout form and order summary.
+
+The homepage featured section, shop, product detail, collections, and new arrivals now use dynamic Prisma-backed queries while preserving the existing UI. The shared header provides an expandable client search that navigates to `/shop?q=<query>`. Homepage category cards use catalogue slugs for their `/shop?category=<slug>` links, and the shop query applies category filtering server-side before the existing client-side URL search. The mock data file remains in place for transition safety and should only be removed after all references are intentionally retired.
+
+## Admin Architecture
+
+### Current state
+
+The `/admin` route group now contains a protected layout and dashboard page. `src/components/admin/admin-shell.tsx` composes the desktop sidebar, header, and content area. `admin-sidebar.tsx` provides desktop navigation and a mobile Sheet drawer. `admin-header.tsx` displays the authenticated admin identity and uses the existing Better Auth client for sign-out.
+
+The current dashboard scope is intentionally limited to real database metrics: total products, total orders, low-stock inventory rows, total customers, and the five most recent orders. No CRUD workflows or future admin routes are implemented.
+
+The first administrator can be established by an operator with `npm run bootstrap:admin -- <existing-user-email>`. The server-side script looks up the existing user by email and updates only `role` to `ADMIN` and `status` to `ACTIVE`; it is not exposed as an HTTP route.
+
+The customer account route is a session-aware UI foundation at `/account`. It displays only identity supplied by the Better Auth session, provides sign-out for authenticated users, and shows a truthful unavailable-authentication state when no session is present. Customer order history and profile editing are not implemented.
+
+### Planned MVP
+
+```text
+/admin
+|- Overview: total products, active products, low stock, recent orders
+|- Products: list, search, create, edit, delete, enable/disable, variants
+|- Categories: basic management
+`- Orders: basic management
+```
+
+Admin forms must eventually cover basic information, category, audience, material, fixed and metal-rate pricing, variants, inventory, images, and status. Admin CRUD and the customer storefront must use the same product database and pricing rules.
+
+## Payment Architecture
+
+### Current state
+
+The Prisma schema contains `Payment` with gateway identifiers, amount, status, paid time, and a one-to-one relation to `Order`. No payment gateway integration or payment API route is implemented. Cash on Delivery is intentionally excluded from the product direction.
+
+### Planned
+
+Only online payment will be supported. The initial implementation will select one gateway from Razorpay, PayU, or Cashfree. Gateway secrets belong in environment variables and must never be stored in Prisma schema or source code. Payment creation, callback/webhook verification, idempotency, and order state transitions must be server-controlled.
+
+## External Services / Environment Variables
+
+Observed environment-backed integrations:
+
+- `DATABASE_URL`: PostgreSQL/Neon connection string used by Prisma config and the runtime Prisma adapter.
+- `RESEND_API_KEY`: Resend API key used by the email transport.
+- `EMAIL_FROM`: sender address used for OTP email.
+
+Environment files and secrets are not architecture data and must remain outside source control. A metal-rate provider and payment provider are not finalized and therefore have no implemented environment contract yet.
+
+## Current Development Status
+
+### Completed / IMPLEMENTED
+
+- Project foundation and database migrations.
+- Prisma PostgreSQL foundation and generated client.
+- Better Auth foundation with Prisma adapter.
+- Email OTP foundation and Resend email transport.
+- User role/status and authorization groundwork.
+- Premium static storefront shell and visual system.
+- Homepage, shop, product detail, cart, checkout UI, collections, new arrivals, and informational pages.
+- Mock product catalogue and local Zustand cart persistence.
+- 404 handling.
+
+### IN PROGRESS
+
+- Catalogue migration from `mockProducts` to Prisma-backed reads.
+- Sprint 6.2 catalogue normalization/loading for the real catalogue.
+- Server-authoritative pricing and checkout validation.
+
+### Completed in this position
+
+- Sprint 6.3 product query layer, mapper, serializable storefront types, and query helpers.
+- Sprint 6.4 dynamic storefront integration for shop, product detail, featured products, collections, and new arrivals.
+
+### PLANNED / Not yet implemented
+
+- Admin CRUD and future admin workflows.
+- Database/local-cart reconciliation.
+- Pricing calculator and live metal-rate integration.
+- Online payment integration and order processing workflow.
+- Invoice generation.
+
+## Current Sprint
+
+**Sprint 7: Admin Foundation**
+
+Completed in this position: **Sprint 6.1 - Controlled Product Schema Audit and Upgrade**, **Sprint 6.3 - Product Data Layer**, **Sprint 6.4 - Dynamic Storefront**, **Sprint 7.1 - Admin Access & Route Protection**, and **Sprint 7.2 - Admin Dashboard Shell**.
+
+The current admin foundation is limited to protected `/admin` access, a responsive shell, and real read-only overview metrics.
+
+## Planned Next Steps
+
+1. **Sprint 6.2:** Complete normalization/loading of the client's raw catalogue into internal product, audience, material, category, and variant data.
+2. Add server-authoritative pricing and checkout validation when the order/payment phase begins.
+3. Add admin product, category, inventory, and order workflows only in their dedicated future sprints.
+
+Each step that changes architecture, routes, models, state, integrations, or sprint status must update this document in the same task.
+
+## Post-Delivery Hotlist
+
+### HOTLIST: Invoice system
+
+Target: approximately one week after initial delivery.
+
+The intended flow is:
+
+```text
+Order
+-> historical OrderItem snapshots
+-> payment / confirmation
+-> invoice generation
+-> PDF or downloadable invoice
+```
+
+Invoice data must be based on immutable order snapshots so later product price, metadata, or catalogue changes cannot alter historical invoices. The existing `OrderItem` already stores product name, SKU, metal, purity, weight, charges, tax, price, and quantity, but invoice generation and delivery are not implemented.
+
+## Architectural Decision Log
+
+### 2026-08-22 / Sprint 6: Prisma as the shared commerce foundation
+
+**Decision:** Use Prisma with PostgreSQL/Neon as the shared persistence layer for storefront and future admin interfaces.
+
+**Reason:** The platform needs one source for products, variants, inventory, orders, pricing inputs, and authentication data while retaining a fast MVP path.
+
+**Impact:** Product reads, admin CRUD, pricing, inventory, and order workflows must converge on the Prisma models and server-side services.
+
+**Status:** Current; product migration is in progress.
+
+### 2026-08-22 / Sprint 6: Normalize catalogue dimensions
+
+**Decision:** Keep category, audience, and material as separate product dimensions; do not duplicate audience in category names.
+
+**Reason:** The same category must support multiple audiences and materials without catalogue duplication.
+
+**Impact:** Catalogue import, product forms, filters, schema audit, and storefront queries must preserve these dimensions.
+
+**Status:** Planned.
+
+### 2026-08-22 / Sprint 6: Support fixed and metal-rate pricing
+
+**Decision:** The product architecture must support both fixed-price and metal-rate-based selling prices, with pricing data at the appropriate product or variant level.
+
+**Reason:** Jewellery and silverware have different pricing needs, and metal-rate calculations must remain accurate enough to avoid financial loss.
+
+**Impact:** Schema audit, pricing service, metal-rate storage/cache, checkout validation, admin forms, and order snapshots.
+
+**Status:** Planned.
+
+### 2026-08-22 / Foundation: Better Auth with email OTP
+
+**Decision:** Use Better Auth with the Prisma adapter and email OTP as the authentication foundation.
+
+**Reason:** It provides the required session/account/verification persistence while fitting the existing PostgreSQL foundation and passwordless MVP flow.
+
+**Impact:** User, Account, Session, and Verification models; auth API route; OTP email delivery; role/status authorization helpers.
+
+**Status:** Current.
+
+### 2026-08-22 / Foundation: Persist guest cart locally
+
+**Decision:** Use Zustand persist with the `npj-cart` local storage key for the current storefront cart.
+
+**Reason:** It provides a fast guest-cart MVP without requiring account state for basic shopping interactions.
+
+**Impact:** Client cart components, hydration handling, future sign-in cart reconciliation, and checkout validation.
+
+**Status:** Current; database cart synchronization planned.
+
+### 2026-08-22 / Commerce: Online payments only
+
+**Decision:** Exclude Cash on Delivery and implement one online payment gateway initially.
+
+**Reason:** The intended checkout must use verified online payment while keeping the first integration focused.
+
+**Impact:** Payment service, webhook/callback routes, order status transitions, environment variables, and checkout UI.
+
+**Status:** Planned; gateway selection pending.
+
+### 2026-08-23 / Sprint 6.3-6.4: Centralized storefront product mapping
+
+**Decision:** Keep Prisma access in server-only feature queries and pass a mapped `StorefrontProduct` shape to the existing storefront components.
+
+**Reason:** This replaces mock reads without exposing Prisma Decimal values or database relations to React components, and avoids redesigning the current storefront.
+
+**Impact:** Product queries, serialization, product cards, product detail, featured products, collections, arrivals, and the remaining mock-data transition.
+
+**Status:** Current.
+
+## Known Technical Considerations
+
+- `product.service.ts` and `order.service.ts` are empty boundaries; product reads currently live in `src/features/products/queries/`, while order logic remains unimplemented.
+- The mock product file remains in the repository, but active storefront page references have been replaced by dynamic queries.
+- Client cart prices are mutable browser state and cannot be trusted for final order totals.
+- Decimal monetary and weight values must preserve precision across Prisma, pricing calculations, serialization, and UI formatting.
+- Variant-level weight and pricing strategy are not fully represented by the current schema; resolve this during the controlled audit rather than adding ad hoc fields during catalogue import.
+- The schema currently has no explicit audience model/field despite that being part of the target product concept.
+- Better Auth rate limiting currently uses process memory, which is suitable for development but has limits across multiple instances.
+- The external metal-rate provider is not selected. Do not fetch it on every product page request; use a validated normalization and database/cache boundary.
+- Payment callbacks/webhooks must be verified server-side and made idempotent before orders are treated as paid.
+- Historical order and invoice values must be snapshots, not live joins to mutable product data.
+- Authentication, admin authorization, pricing, inventory checks, and payment state transitions are server responsibilities.
+- Any future change to routes, schema, auth, state, integrations, or sprint status must update this living document in the same task.
+</file>
+
 <file path="package.json">
 {
   "name": "npj",
@@ -20373,6 +21754,7 @@ model StoreSettings {
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "postinstall": "prisma generate",
     "bootstrap:admin": "tsx scripts/promote-admin.ts"
   },
   "dependencies": {
@@ -20388,12 +21770,13 @@ model StoreSettings {
     "lucide-react": "^1.28.0",
     "next": "16.3.0",
     "pg": "^8.23.0",
-    "prisma": "^7.9.1",
     "radix-ui": "^1.6.7",
+    "razorpay": "^2.9.8",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-hook-form": "^7.84.0",
     "resend": "^6.19.0",
+    "server-only": "^0.0.1",
     "shadcn": "^4.16.1",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
@@ -20408,6 +21791,7 @@ model StoreSettings {
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
+    "prisma": "^7.9.1",
     "tailwindcss": "^4",
     "tsx": "^4.23.12",
     "typescript": "^5"

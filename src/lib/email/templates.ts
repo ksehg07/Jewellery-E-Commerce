@@ -57,3 +57,34 @@ export function otpEmailTemplate({
     `,
   };
 }
+
+export function orderConfirmationEmailTemplate({
+  orderNumber,
+  customerName,
+  totalAmount,
+}: {
+  orderNumber: string;
+  customerName: string;
+  totalAmount: string;
+}) {
+  return {
+    subject: `Order Confirmation - ${orderNumber} | Parth Jewellers`,
+    text: `Hi ${customerName},\n\nThank you for your order! Your payment of ₹${totalAmount} has been received and your order ${orderNumber} is confirmed.\n\nPlease find your invoice attached.\n\nThanks,\nParth Jewellers`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
+          <div style="max-width:560px;margin:40px auto;background:#ffffff;padding:40px;border-radius:12px;">
+            <h2 style="margin-top:0;">Order Confirmed!</h2>
+            <p>Hi ${customerName},</p>
+            <p>Thank you for your purchase. We have received your payment of <strong>₹${totalAmount}</strong>.</p>
+            <p>Your order number is: <strong>${orderNumber}</strong></p>
+            <p>Your invoice is attached to this email.</p>
+            <hr style="border:none;border-top:1px solid #eee;margin:30px 0;" />
+            <p style="font-size:12px;color:#999;">Parth Jewellers</p>
+          </div>
+        </body>
+      </html>
+    `,
+  };
+}

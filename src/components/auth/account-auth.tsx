@@ -10,7 +10,7 @@ import { authClient } from "@/lib/auth/auth-client";
 
 type Step = "email" | "otp";
 
-export function AccountAuth() {
+export function AccountAuth({ callbackUrl = "/account" }: { callbackUrl?: string }) {
   const router = useRouter();
 
   const [step, setStep] = useState<Step>("email");
@@ -85,7 +85,7 @@ export function AccountAuth() {
         return;
       }
 
-      router.push("/account");
+      router.push(callbackUrl);
       router.refresh();
     } catch {
       setError("Unable to sign you in. Please try again.");

@@ -23,5 +23,5 @@ export async function getFeaturedProducts(
     take: limit,
   });
 
-  return mapProducts(products);
+  return await mapProducts(products);
 }

@@ -1,4 +1,5 @@
 import type { Prisma } from "@/generated/prisma/client";
+import { calculatePrice } from "@/services/pricing.service";
 
 import type {
   StorefrontProduct,
@@ -43,17 +44,32 @@ function getInventoryQuantity(
   );
 }
 
-function mapVariant(
+
+async function mapVariant(
   variant: ProductQueryResult["variants"][number],
-  productPrice: number | null,
-): StorefrontProductVariant {
-  const fixedPrice = toNumber(variant.fixedPrice);
-  const priceAdjustment = toNumber(variant.priceAdjustment);
-  const price = fixedPrice ?? (
-    productPrice !== null && priceAdjustment !== null
-      ? productPrice + priceAdjustment
-      : productPrice
-  );
+  product: ProductQueryResult,
+): Promise<StorefrontProductVariant> {
+  let price = 0;
+  try {
+    const priceResult = await calculatePrice({
+      pricingStrategy: variant.pricingStrategy || product.pricingStrategy,
+      fixedPrice: variant.fixedPrice !== null ? Number(variant.fixedPrice) : (product.fixedPrice !== null ? Number(product.fixedPrice) : null),
+      metal: product.metal,
+      purity: product.purity,
+      netWeight: variant.weight !== null ? Number(variant.weight) : Number(product.netWeight),
+      makingChargeType: variant.makingChargeType || product.makingChargeType,
+      makingChargeValue: variant.makingChargeValue !== null ? Number(variant.makingChargeValue) : Number(product.makingChargeValue),
+      wastagePercentage: Number(product.wastagePercentage || 0),
+      stoneCharge: variant.stoneCharges !== null ? Number(variant.stoneCharges) : Number(product.stoneCharge || 0),
+      variantPriceAdjustment: variant.priceAdjustment !== null ? Number(variant.priceAdjustment) : 0,
+        gstPercentage: Number(product.gstPercentage || 3)
+    });
+    price = priceResult.finalPrice;
+  } catch (err) {
+    console.error("Pricing error for variant", variant.id, err);
+    // fallback if Metals.Dev fails or missing info
+    price = 0;
+  }
 
   return {
     id: variant.id,
@@ -65,14 +81,35 @@ function mapVariant(
   };
 }
 
-export function mapProduct(
+export async function mapProduct(
   product: ProductQueryResult,
-): StorefrontProduct {
+): Promise<StorefrontProduct> {
   const images = product.images.map((image) => image.imageUrl);
-  const productPrice = toNumber(product.fixedPrice);
-  const variants = product.variants.map((variant) =>
-    mapVariant(variant, productPrice),
+  
+  let productPrice = 0;
+  try {
+    const priceResult = await calculatePrice({
+      pricingStrategy: product.pricingStrategy,
+      fixedPrice: product.fixedPrice !== null ? Number(product.fixedPrice) : null,
+      metal: product.metal,
+      purity: product.purity,
+      netWeight: Number(product.netWeight),
+      makingChargeType: product.makingChargeType,
+      makingChargeValue: Number(product.makingChargeValue),
+      wastagePercentage: Number(product.wastagePercentage || 0),
+      stoneCharge: Number(product.stoneCharge || 0),
+      variantPriceAdjustment: 0,
+        gstPercentage: Number(product.gstPercentage || 3)
+    });
+    productPrice = priceResult.finalPrice;
+  } catch (err) {
+    console.error("Pricing error for product", product.id, err);
+  }
+
+  const variants = await Promise.all(
+    product.variants.map((variant) => mapVariant(variant, product))
   );
+  
   const productStock = getInventoryQuantity(product.inventory);
   const inStock = variants.length > 0
     ? variants.some((variant) => variant.inStock)
@@ -90,7 +127,7 @@ export function mapProduct(
     audience: product.audience,
     material: product.metal,
     purity: product.purity,
-    weight: toNumber(product.netWeight),
+    weight: Number(product.netWeight),
     badge: product.isFeatured ? "Featured" : undefined,
     shortDescription: product.shortDescription ?? undefined,
     description: product.description ?? undefined,
@@ -101,8 +138,8 @@ export function mapProduct(
   };
 }
 
-export function mapProducts(
+export async function mapProducts(
   products: ProductQueryResult[],
-): StorefrontProduct[] {
-  return products.map(mapProduct);
+): Promise<StorefrontProduct[]> {
+  return Promise.all(products.map(mapProduct));
 }

@@ -345,6 +345,8 @@ model Product {
 
   wastagePercentage Decimal? @db.Decimal(5, 2)
 
+  gstPercentage Decimal @default(3) @db.Decimal(5, 2)
+
   isFeatured Boolean @default(false)
 
   isActive Boolean @default(true)

@@ -34,5 +34,5 @@ export async function getProducts(
     ...(options.limit ? { take: options.limit } : {}),
   });
 
-  return mapProducts(products);
+  return await mapProducts(products);
 }

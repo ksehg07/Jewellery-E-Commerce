@@ -31,8 +31,9 @@ const navigation = [
   },
   {
     label: "Products",
+    href: "/admin/products",
     icon: PackageSearch,
-    available: false,
+    available: true,
   },
   {
     label: "Categories",
@@ -41,8 +42,9 @@ const navigation = [
   },
   {
     label: "Orders",
+    href: "/admin/orders",
     icon: ClipboardList,
-    available: false,
+    available: true,
   },
   {
     label: "Inventory",

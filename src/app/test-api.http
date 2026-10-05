@@ -15,3 +15,28 @@ Content-Type: application/json
   "email": "ksehgal2003@gmail.com",
   "otp": "554973"
 }
+
+###
+
+# Razorpay: Create Order (minimum 100 paise = ₹1)
+POST http://localhost:3000/api/create-order
+Content-Type: application/json
+
+{
+  "amount": 50000,
+  "currency": "INR",
+  "receipt": "rcpt_manual_test_01"
+}
+
+###
+
+# Razorpay: Verify Payment Signature
+POST http://localhost:3000/api/verify-payment
+Content-Type: application/json
+
+{
+  "razorpay_order_id": "order_test_123",
+  "razorpay_payment_id": "pay_test_456",
+  "razorpay_signature": "your_test_signature"
+}
+}

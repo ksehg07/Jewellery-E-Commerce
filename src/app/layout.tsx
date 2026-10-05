@@ -25,6 +25,8 @@ export const metadata: Metadata = {
     "Discover timeless jewellery crafted for every celebration.",
 };
 
+import { Toaster } from "sonner";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -34,6 +36,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${manrope.variable} ${cormorant.variable}`}>
         {children}
+        <Toaster position="top-right" richColors />
       </body>
     </html>
   );
