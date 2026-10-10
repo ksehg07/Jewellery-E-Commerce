@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createProductAction, updateProductAction, previewPriceAction } from "@/app/(admin)/admin/products/actions";
 
+import { uploadProductImageAction } from "@/app/(admin)/admin/products/image-actions";
+
 type ProductFormProps = {
   initialData?: any;
   categories: { id: string; name: string }[];
@@ -18,10 +20,42 @@ export function ProductForm({ initialData, categories }: ProductFormProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [pricingStrategy, setPricingStrategy] = useState(initialData?.pricingStrategy || "FIXED");
-  const initialImages = (initialData?.images as any[])?.map((i: any) => i.imageUrl);
-  const [images, setImages] = useState<string[]>(initialImages?.length ? initialImages : [""]);
+  
+  const initialImages = (initialData?.images as any[])?.map((i: any) => ({ url: i.imageUrl, publicId: i.publicId || null })) || [];
+  const [images, setImages] = useState<{url: string, publicId: string | null}[]>(initialImages);
+  
   const [preview, setPreview] = useState<any>(null);
   const [variants, setVariants] = useState<any[]>(initialData?.variants as any[] || []);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setUploadingImage(true);
+    setError("");
+
+    try {
+      const newImages = [...images];
+      for (let i = 0; i < files.length; i++) {
+        const formData = new FormData();
+        formData.append("file", files[i]);
+        
+        const result = await uploadProductImageAction(formData) as any;
+        if (result.error) {
+          setError((prev) => prev ? prev + " | " + result.error : result.error);
+        } else if (result.success) {
+          newImages.push({ url: result.url, publicId: result.publicId });
+        }
+      }
+      setImages(newImages);
+    } catch (err) {
+      setError("Image upload failed");
+    } finally {
+      setUploadingImage(false);
+      if (e.target) e.target.value = ""; // Reset file input
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -31,10 +65,7 @@ export function ProductForm({ initialData, categories }: ProductFormProps) {
     const formData = new FormData(e.currentTarget);
     
     formData.append("variantsData", JSON.stringify(variants));
-    // Add images back into form data securely
-    images.forEach((url, i) => {
-      formData.append(`image_${i}`, url);
-    });
+    formData.append("imagesData", JSON.stringify(images));
 
     try {
       const result = initialData 
@@ -246,25 +277,33 @@ export function ProductForm({ initialData, categories }: ProductFormProps) {
 
       <div className="space-y-4 rounded-md border p-4 bg-card">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-lg">Product Images (URLs)</h2>
-          <Button type="button" variant="outline" size="sm" onClick={() => setImages([...images, ""])}>
-            <Plus className="mr-2 size-4" /> Add Image URL
-          </Button>
+          <h2 className="font-semibold text-lg">Product Images</h2>
+          <div className="relative">
+            <Button type="button" variant="outline" size="sm" disabled={uploadingImage}>
+              {uploadingImage ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Plus className="mr-2 size-4" />}
+              Upload Image
+            </Button>
+            <input 
+              type="file" 
+              multiple 
+              accept="image/*" 
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed" 
+              onChange={handleImageUpload} 
+              disabled={uploadingImage}
+            />
+          </div>
         </div>
-        <p className="text-sm text-muted-foreground">Upload functionality is currently unavailable. Please provide direct image URLs.</p>
+        <p className="text-sm text-muted-foreground">Select images to upload. First image will be the primary one.</p>
         
         <div className="space-y-3">
-          {images.map((url, idx) => (
-            <div key={idx} className="flex items-center gap-2">
-              <Input 
-                value={url} 
-                onChange={(e) => {
-                  const newImages = [...images];
-                  newImages[idx] = e.target.value;
-                  setImages(newImages);
-                }} 
-                placeholder="https://example.com/image.jpg" 
-              />
+          {images.map((img, idx) => (
+            <div key={idx} className="flex items-center gap-4 border p-2 rounded bg-muted/30">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={img.url} alt="Preview" className="w-16 h-16 object-cover rounded" />
+              <div className="flex-1 overflow-hidden">
+                <p className="text-sm truncate text-gray-600">{img.url}</p>
+                {img.publicId && <p className="text-xs text-gray-400 truncate">ID: {img.publicId}</p>}
+              </div>
               <Button type="button" variant="ghost" size="icon" onClick={() => {
                 const newImages = images.filter((_, i) => i !== idx);
                 setImages(newImages);
@@ -273,6 +312,11 @@ export function ProductForm({ initialData, categories }: ProductFormProps) {
               </Button>
             </div>
           ))}
+          {images.length === 0 && !uploadingImage && (
+            <div className="py-8 text-center border-2 border-dashed rounded text-muted-foreground text-sm">
+              No images uploaded
+            </div>
+          )}
         </div>
       </div>
 

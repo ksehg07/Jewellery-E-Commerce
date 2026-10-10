@@ -28,6 +28,32 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
     notFound();
   }
 
+  // Serialize Prisma Decimals for Client Component
+  const serializedProduct = { ...product };
+  const decimalFields = [
+    "fixedPrice", "netWeight", "makingChargeValue", 
+    "additionalCharges", "stoneCharge", "wastagePercentage", "gstPercentage"
+  ] as const;
+  
+  for (const field of decimalFields) {
+    if (serializedProduct[field] !== null && serializedProduct[field] !== undefined) {
+      serializedProduct[field] = serializedProduct[field].toString() as any;
+    }
+  }
+
+  if (serializedProduct.variants) {
+    serializedProduct.variants = serializedProduct.variants.map((v: any) => {
+      const sv = { ...v };
+      const vDecimalFields = ["weight", "fixedPrice", "makingChargeValue", "additionalCharges", "stoneCharges", "priceAdjustment"] as const;
+      for (const field of vDecimalFields) {
+        if (sv[field] !== null && sv[field] !== undefined) {
+          sv[field] = sv[field].toString();
+        }
+      }
+      return sv;
+    });
+  }
+
   const categories = await getCategories();
 
   return (
@@ -47,7 +73,7 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
         </form>
       </div>
 
-      <ProductForm initialData={product} categories={categories} />
+      <ProductForm initialData={serializedProduct} categories={categories} />
     </div>
   );
 }

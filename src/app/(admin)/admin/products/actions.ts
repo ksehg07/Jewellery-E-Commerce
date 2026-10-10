@@ -5,19 +5,19 @@ import { prisma } from "@/lib/prisma/client";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { productSchema } from "@/lib/validations/product";
 import { calculatePrice } from "@/services/pricing.service";
+import cloudinary from "@/lib/cloudinary";
+
+type ImageItem = { url: string; publicId: string | null };
 
 export async function createProductAction(formData: FormData) {
   await requireAdmin();
 
   const data = Object.fromEntries(formData.entries());
   
-  // Extract dynamic image URLs
-  const images: string[] = [];
-  for (const [key, value] of formData.entries()) {
-    if (key.startsWith("image_") && typeof value === "string" && value.trim()) {
-      images.push(value.trim());
-    }
-  }
+  let images: ImageItem[] = [];
+  try {
+    images = JSON.parse(data.imagesData as string || "[]");
+  } catch {}
 
   const payload = {
     ...data,
@@ -48,7 +48,7 @@ export async function createProductAction(formData: FormData) {
         isFeatured: v.isFeatured,
         
         pricingStrategy: v.pricingStrategy,
-          gstPercentage: v.gstPercentage,
+        gstPercentage: v.gstPercentage,
         fixedPrice: v.fixedPrice || null,
         
         metal: v.metal,
@@ -60,8 +60,9 @@ export async function createProductAction(formData: FormData) {
         wastagePercentage: v.wastagePercentage || 0,
         
         images: {
-          create: v.images?.map((url, index) => ({
-            imageUrl: url,
+          create: v.images?.map((img, index) => ({
+            imageUrl: img.url,
+            publicId: img.publicId || null,
             isPrimary: index === 0,
             sortOrder: index,
           })) || []
@@ -96,12 +97,10 @@ export async function updateProductAction(id: string, formData: FormData) {
 
   const data = Object.fromEntries(formData.entries());
   
-  const images: string[] = [];
-  for (const [key, value] of formData.entries()) {
-    if (key.startsWith("image_") && typeof value === "string" && value.trim()) {
-      images.push(value.trim());
-    }
-  }
+  let images: ImageItem[] = [];
+  try {
+    images = JSON.parse(data.imagesData as string || "[]");
+  } catch {}
 
   const payload = {
     ...data,
@@ -122,16 +121,22 @@ export async function updateProductAction(id: string, formData: FormData) {
     let variantsData: VariantItem[] = [];
     try {
       variantsData = JSON.parse(data.variantsData as string || "[]");
-    } catch {
-      // ignore
-    }
+    } catch {}
+
+    // Find old images to determine which to delete from Cloudinary
+    const oldImages = await prisma.productImage.findMany({
+      where: { productId: id }
+    });
+    
+    const incomingPublicIds = new Set(images.map(img => img.publicId).filter(Boolean));
+    const imagesToDelete = oldImages.filter(img => img.publicId && !incomingPublicIds.has(img.publicId));
 
     await prisma.$transaction(async (tx) => {
       await tx.productImage.deleteMany({
         where: { productId: id }
       });
 
-      // Instead of deleting variants (which breaks foreign keys on OrderItem), we mark missing ones inactive
+      // Mark missing variants inactive
       const incomingIds = variantsData.map((variant) => variant.id).filter((vid: string) => !vid.startsWith("new_"));
       
       await tx.productVariant.updateMany({
@@ -144,7 +149,6 @@ export async function updateProductAction(id: string, formData: FormData) {
 
       for (const variant of variantsData) {
         if (variant.id && !variant.id.startsWith("new_")) {
-          // Update existing
           await tx.productVariant.update({
             where: { id: variant.id },
             data: {
@@ -157,7 +161,6 @@ export async function updateProductAction(id: string, formData: FormData) {
             }
           });
         } else {
-          // Create new
           await tx.productVariant.create({
             data: {
               productId: id,
@@ -198,8 +201,9 @@ export async function updateProductAction(id: string, formData: FormData) {
           wastagePercentage: v.wastagePercentage || 0,
           
           images: {
-            create: v.images?.map((url, index) => ({
-              imageUrl: url,
+            create: v.images?.map((img, index) => ({
+              imageUrl: img.url,
+              publicId: img.publicId || null,
               isPrimary: index === 0,
               sortOrder: index,
             })) || []
@@ -207,6 +211,15 @@ export async function updateProductAction(id: string, formData: FormData) {
         },
       });
     });
+
+    // Clean up deleted images from Cloudinary (only after successful DB transaction)
+    for (const img of imagesToDelete) {
+      try {
+        await cloudinary.uploader.destroy(img.publicId!);
+      } catch (err) {
+        console.error("Failed to delete Cloudinary asset:", img.publicId, err);
+      }
+    }
 
     revalidatePath("/admin/products");
     revalidatePath("/product/" + v.slug);
@@ -227,9 +240,25 @@ export async function deleteProductAction(id: string) {
   await requireAdmin();
   
   try {
+    const oldImages = await prisma.productImage.findMany({
+      where: { productId: id }
+    });
+
     await prisma.product.delete({
       where: { id }
     });
+
+    // Delete associated Cloudinary images
+    for (const img of oldImages) {
+      if (img.publicId) {
+        try {
+          await cloudinary.uploader.destroy(img.publicId);
+        } catch (err) {
+          console.error("Failed to delete Cloudinary asset:", img.publicId, err);
+        }
+      }
+    }
+
     revalidatePath("/admin/products");
     revalidatePath("/shop");
     return { success: true };
@@ -243,8 +272,6 @@ export async function previewPriceAction(data: Record<string, string>) {
   await requireAdmin();
   
   try {
-    // We trust that the incoming data matches the enum shapes roughly here,
-    // or the price calculation will throw if invalid.
     const result = await calculatePrice({
       pricingStrategy: data.pricingStrategy as any,
       gstPercentage: Number(data.gstPercentage || 3),

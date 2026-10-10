@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import cloudinaryLoader from "@/lib/cloudinary-loader";
 
 import { Heart } from "lucide-react";
 
@@ -21,6 +22,7 @@ export function ProductCard({ product }: ProductCardProps) {
 
         <Link href={`/product/${product.slug}`}>
           <Image
+            loader={cloudinaryLoader}
             src={product.image}
             alt={product.name}
             fill

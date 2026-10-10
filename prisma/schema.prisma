@@ -387,6 +387,8 @@ model ProductImage {
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
+  publicId String?
+
   imageUrl String
 
   altText String?

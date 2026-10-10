@@ -38,7 +38,10 @@ export const productSchema = z.object({
   wastagePercentage: z.coerce.number().min(0).optional().nullable(),
 
   // Images 
-  images: z.array(z.string().url("Must be a valid URL")).optional(),
+  images: z.array(z.object({
+    url: z.string().url("Must be a valid URL"),
+    publicId: z.string().nullable().optional()
+  })).optional(),
 }).superRefine((data, ctx) => {
   if (data.pricingStrategy === PricingStrategy.FIXED) {
     if (data.fixedPrice === null || data.fixedPrice === undefined) {

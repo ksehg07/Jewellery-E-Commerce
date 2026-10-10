@@ -1,4 +1,5 @@
 import Image from "next/image";
+import cloudinaryLoader from "@/lib/cloudinary-loader";
 
 type ProductGalleryProps = {
   images: string[];
@@ -17,6 +18,7 @@ export function ProductGallery({
           className="relative aspect-square overflow-hidden bg-secondary"
         >
           <Image
+            loader={cloudinaryLoader}
             src={image}
             alt={`${name} - view ${index + 1}`}
             fill
